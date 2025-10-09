@@ -1,0 +1,121 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import { healthCheckSchema, userSchema } from '@monorepo/shared';
+import { Pool } from 'pg';
+
+const fastify = Fastify({
+  logger: true,
+});
+
+// CORS configuration
+await fastify.register(cors, {
+  origin: true,
+});
+
+// Database connection
+const pool = new Pool({
+  host: process.env.POSTGRES_HOST || 'localhost',
+  port: parseInt(process.env.POSTGRES_PORT || '5432'),
+  database: process.env.POSTGRES_DB || 'monorepo',
+  user: process.env.POSTGRES_USER || 'postgres',
+  password: process.env.POSTGRES_PASSWORD || 'postgres',
+});
+
+// Health check endpoint
+fastify.get('/health', async (_request, reply) => {
+  const timestamp = new Date();
+  
+  try {
+    // Check database
+    const dbStart = Date.now();
+    await pool.query('SELECT 1');
+    const dbLatency = Date.now() - dbStart;
+
+    const health = {
+      status: 'healthy' as const,
+      timestamp,
+      services: {
+        database: {
+          status: 'up' as const,
+          latency: dbLatency,
+        },
+      },
+    };
+
+    // Validate with shared schema
+    healthCheckSchema.parse(health);
+
+    return reply.code(200).send(health);
+  } catch (error) {
+    fastify.log.error(error);
+    return reply.code(503).send({
+      status: 'unhealthy',
+      timestamp,
+      services: {
+        database: {
+          status: 'down' as const,
+        },
+      },
+    });
+  }
+});
+
+// Sample users endpoint
+fastify.get('/users', async (_request, reply) => {
+  try {
+    const result = await pool.query('SELECT * FROM users LIMIT 10');
+    return reply.code(200).send({
+      success: true,
+      data: result.rows,
+      timestamp: new Date(),
+    });
+  } catch (error) {
+    fastify.log.error(error);
+    return reply.code(500).send({
+      success: false,
+      error: 'Failed to fetch users',
+      timestamp: new Date(),
+    });
+  }
+});
+
+// Sample create user endpoint
+fastify.post('/users', async (request, reply) => {
+  try {
+    const userData = userSchema.omit({ id: true, createdAt: true, updatedAt: true }).parse(request.body);
+    
+    const result = await pool.query(
+      'INSERT INTO users (email, name) VALUES ($1, $2) RETURNING *',
+      [userData.email, userData.name]
+    );
+
+    return reply.code(201).send({
+      success: true,
+      data: result.rows[0],
+      timestamp: new Date(),
+    });
+  } catch (error) {
+    fastify.log.error(error);
+    return reply.code(400).send({
+      success: false,
+      error: error instanceof Error ? error.message : 'Invalid request',
+      timestamp: new Date(),
+    });
+  }
+});
+
+// Start server
+const start = async () => {
+  try {
+    const port = parseInt(process.env.PORT || '4000');
+    const host = process.env.HOST || '0.0.0.0';
+    
+    await fastify.listen({ port, host });
+    fastify.log.info(`API server running on http://${host}:${port}`);
+  } catch (err) {
+    fastify.log.error(err);
+    process.exit(1);
+  }
+};
+
+start();
