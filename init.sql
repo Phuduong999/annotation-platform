@@ -70,11 +70,14 @@ CREATE TABLE IF NOT EXISTS tasks (
     scan_type VARCHAR(100) NOT NULL,
     user_input TEXT NOT NULL,
     raw_ai_output JSONB,
+    ai_confidence FLOAT,
     scan_date TIMESTAMP WITH TIME ZONE NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    assigned_to VARCHAR(255),
+    assigned_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT check_task_status CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
+    CONSTRAINT check_task_status CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'assigned'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);
@@ -83,6 +86,23 @@ CREATE INDEX IF NOT EXISTS idx_import_rows_job_id ON import_rows(import_job_id);
 CREATE INDEX IF NOT EXISTS idx_import_rows_status ON import_rows(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_request_id ON tasks(request_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned_to ON tasks(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_tasks_ai_confidence ON tasks(ai_confidence DESC) WHERE status = 'pending';
+
+-- Task Assignments table for logging
+CREATE TABLE IF NOT EXISTS task_assignments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    assigned_to VARCHAR(255) NOT NULL,
+    assignment_method VARCHAR(50) NOT NULL,
+    priority_score FLOAT,
+    assigned_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT check_assignment_method CHECK (assignment_method IN ('equal_split', 'pull_queue'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_assignments_task_id ON task_assignments(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_assignments_assigned_to ON task_assignments(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_task_assignments_assigned_at ON task_assignments(assigned_at DESC);
 
 -- Assets table for link health tracking
 CREATE TABLE IF NOT EXISTS assets (
