@@ -7,6 +7,7 @@ import { importRoutes } from './routes/import.routes.js';
 import { taskRoutes } from './routes/task.routes.js';
 import { feedbackRoutes } from './routes/feedback.routes.js';
 import { reviewRoutes } from './routes/review.routes.js';
+import { exportRoutes } from './routes/export.routes.js';
 
 const fastify = Fastify({
   logger: true,
@@ -127,6 +128,9 @@ await feedbackRoutes(fastify, pool);
 
 // Review routes
 await reviewRoutes(fastify, pool);
+
+// Export and snapshot routes
+await exportRoutes(fastify, pool);
 
 // Start server
 const start = async () => {
