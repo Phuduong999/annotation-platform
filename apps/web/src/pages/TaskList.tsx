@@ -264,6 +264,12 @@ export function TaskList() {
               checked={filter.assigned_to_me || false}
               onChange={(event) => setFilter({ ...filter, assigned_to_me: event.currentTarget.checked })}
             />
+
+            <Switch
+              label="Has end-user dislike"
+              checked={filter.has_dislike || false}
+              onChange={(event) => setFilter({ ...filter, has_dislike: event.currentTarget.checked })}
+            />
           </Group>
         </Card>
 

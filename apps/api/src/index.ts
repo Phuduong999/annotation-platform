@@ -5,6 +5,7 @@ import { healthCheckSchema, userSchema } from '@monorepo/shared';
 import { Pool } from 'pg';
 import { importRoutes } from './routes/import.routes.js';
 import { taskRoutes } from './routes/task.routes.js';
+import { feedbackRoutes } from './routes/feedback.routes.js';
 
 const fastify = Fastify({
   logger: true,
@@ -119,6 +120,9 @@ await importRoutes(fastify, pool);
 
 // Task routes
 await taskRoutes(fastify, pool);
+
+// Feedback routes
+await feedbackRoutes(fastify, pool);
 
 // Start server
 const start = async () => {

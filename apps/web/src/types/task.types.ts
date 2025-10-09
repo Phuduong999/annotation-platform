@@ -19,11 +19,11 @@ export interface Task {
   result: TaskResult | null;
   created_at: string;
   updated_at: string;
+  end_user_feedback?: EndUserFeedback | null;
 }
 
 export interface TaskResult {
   classification: string;
-  feedback?: string;
   tags?: string[];
   nutrition?: NutritionData;
   annotated_by?: string;
@@ -75,6 +75,8 @@ export interface TaskFilter {
   type?: Task['type'];
   date_from?: string;
   date_to?: string;
+  has_dislike?: boolean;
+  feedback_category?: string;
 }
 
 export interface ParsedAIOutput {
@@ -89,6 +91,16 @@ export interface ParsedAIOutput {
 export interface TaskAnnotation {
   classification: 'explicit' | 'adult' | 'suggestive' | 'medical' | 'safe';
   tags: string[];
-  feedback: string;
   nutrition?: NutritionData;
+}
+
+export interface EndUserFeedback {
+  id: string;
+  request_id: string;
+  user_event_id?: string;
+  reaction: 'like' | 'dislike' | 'neutral';
+  category?: string;
+  note?: string;
+  source: string;
+  created_at: string;
 }

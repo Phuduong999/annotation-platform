@@ -5,6 +5,77 @@ import { TaskService } from '../services/task.service.js';
 export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
   const taskService = new TaskService(pool);
 
+  // GET /tasks/:id - Get single task with feedback
+  fastify.get(
+    '/tasks/:id',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: {
+          id: string;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { id } = request.params;
+
+        // Get task details
+        const taskResult = await pool.query(
+          'SELECT * FROM tasks WHERE id = $1',
+          [id]
+        );
+
+        if (taskResult.rows.length === 0) {
+          return reply.code(404).send({
+            success: false,
+            error: 'Task not found',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const task = taskResult.rows[0];
+
+        // Get end-user feedback if exists
+        const feedbackResult = await pool.query(
+          `SELECT * FROM feedback_events 
+           WHERE request_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [task.request_id]
+        );
+
+        // Attach feedback to task
+        if (feedbackResult.rows.length > 0) {
+          task.end_user_feedback = feedbackResult.rows[0];
+        }
+
+        return reply.code(200).send({
+          success: true,
+          data: task,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
   // POST /tasks/create - Create tasks from import job
   fastify.post(
     '/tasks/create',

@@ -40,6 +40,7 @@ import {
 import { taskService } from '../services/task.service';
 import { TaskAnnotation, ParsedAIOutput } from '../types/task.types';
 import { parseAIOutput, formatAIOutputDisplay, validateNutrition } from '../utils/nutrition.utils';
+import { EndUserFeedback } from '../components/EndUserFeedback';
 
 export function TaskDetail() {
   const { id } = useParams<{ id: string }>();
@@ -76,7 +77,6 @@ export function TaskDetail() {
     initialValues: {
       classification: 'safe' as TaskAnnotation['classification'],
       tags: [],
-      feedback: '',
       nutrition: parsedAI.nutrition,
     },
     validate: {
@@ -84,10 +84,6 @@ export function TaskDetail() {
         if (!value) return 'Classification is required';
         const validValues = ['explicit', 'adult', 'suggestive', 'medical', 'safe'];
         if (!validValues.includes(value)) return 'Invalid classification';
-        return null;
-      },
-      feedback: (value) => {
-        if (value && value.length > 1000) return 'Feedback too long (max 1000 characters)';
         return null;
       },
     },
@@ -100,7 +96,6 @@ export function TaskDetail() {
       form.setValues({
         classification,
         tags: task.result.tags || [],
-        feedback: task.result.feedback || '',
         nutrition: task.result.nutrition || parsedAI.nutrition,
       });
     } else if (parsedAI.classification) {
@@ -246,6 +241,11 @@ export function TaskDetail() {
         skipMutation.mutate(reason);
       },
     });
+  };
+
+  // Handle category click to filter tasks
+  const handleCategoryClick = (category: string) => {
+    navigate(`/tasks?category=${encodeURIComponent(category)}`);
   };
 
   // Hotkeys
@@ -437,19 +437,17 @@ export function TaskDetail() {
                         clearable
                       />
 
-                      {/* Feedback */}
-                      <Textarea
-                        label="Feedback"
-                        placeholder="Additional notes or corrections"
-                        rows={4}
-                        {...form.getInputProps('feedback')}
-                        error={form.errors.feedback}
+                      {/* End-User Feedback - Read Only */}
+                      <EndUserFeedback 
+                        feedback={task.end_user_feedback} 
+                        onCategoryClick={handleCategoryClick}
                       />
 
                       {/* Task Metadata */}
                       <Paper p="sm" withBorder>
                         <Stack gap="xs">
                           <Text size="xs" fw={500}>Task Info:</Text>
+                          <Text size="xs">Request ID: {task.request_id}</Text>
                           <Text size="xs">Team: {task.team_id}</Text>
                           <Text size="xs">Type: {task.type}</Text>
                           <Text size="xs">Confidence: {(task.ai_confidence * 100).toFixed(1)}%</Text>
