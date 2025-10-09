@@ -1,37 +1,7 @@
--- Initialize database schema
+-- Migration: Import Jobs and Rows
+-- Description: Tables for CSV import job tracking and row-level validation
 
--- Create users table
-CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Create index on email
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-
--- Insert sample data
-INSERT INTO users (email, name) VALUES
-    ('john@example.com', 'John Doe'),
-    ('jane@example.com', 'Jane Smith'),
-    ('bob@example.com', 'Bob Johnson')
-ON CONFLICT (email) DO NOTHING;
-
--- Create updated_at trigger
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- Import Jobs and Rows tables
+-- Import Jobs table
 CREATE TABLE IF NOT EXISTS import_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     filename VARCHAR(255) NOT NULL,
@@ -48,6 +18,7 @@ CREATE TABLE IF NOT EXISTS import_jobs (
     CONSTRAINT check_status CHECK (status IN ('processing', 'completed', 'failed'))
 );
 
+-- Import Rows table
 CREATE TABLE IF NOT EXISTS import_rows (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     import_job_id UUID NOT NULL REFERENCES import_jobs(id) ON DELETE CASCADE,
@@ -61,6 +32,7 @@ CREATE TABLE IF NOT EXISTS import_rows (
     CONSTRAINT check_row_status CHECK (status IN ('valid', 'invalid'))
 );
 
+-- Task stubs table (placeholder for actual tasks)
 CREATE TABLE IF NOT EXISTS tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     import_row_id UUID REFERENCES import_rows(id) ON DELETE SET NULL,
@@ -77,9 +49,38 @@ CREATE TABLE IF NOT EXISTS tasks (
     CONSTRAINT check_task_status CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
 );
 
+-- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_import_jobs_created_at ON import_jobs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_import_rows_job_id ON import_rows(import_job_id);
 CREATE INDEX IF NOT EXISTS idx_import_rows_status ON import_rows(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_request_id ON tasks(request_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+
+-- Updated trigger for import_jobs
+CREATE OR REPLACE FUNCTION update_import_jobs_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_import_jobs_updated_at 
+    BEFORE UPDATE ON import_jobs
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_import_jobs_updated_at();
+
+-- Updated trigger for tasks
+CREATE OR REPLACE FUNCTION update_tasks_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_tasks_updated_at 
+    BEFORE UPDATE ON tasks
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_tasks_updated_at();

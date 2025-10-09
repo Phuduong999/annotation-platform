@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@fastify/cors": "^8.5.0",
+    "@fastify/multipart": "^8.1.0",
     "@monorepo/shared": "workspace:*",
+    "csv-parse": "^5.5.3",
     "fastify": "^4.25.2",
     "pg": "^8.11.3"
   },

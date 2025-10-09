@@ -1,0 +1,9 @@
+date,request_id,user_id,team_id,type,user_input,raw_ai_output
+2024-01-01T12:00:00Z,req-001,user-123,team-456,content_moderation,https://example.com/image1.jpg,{"result":"safe","confidence":0.95}
+2024-01-02T13:00:00Z,req-002,user-124,team-456,safety_check,https://example.com/image2.png,{"status":"approved"}
+2024-01-03,req-003,user-125,team-456,content_moderation,https://example.com/image3.jpg,{"result":"flagged"}
+2024-01-04T15:00:00Z,req-004,user-126,team-456,invalid_type,https://example.com/image4.jpg,{"result":"safe"}
+2024-01-05T16:00:00Z,req-005,user-127,team-456,quality_assessment,not-a-valid-url,{"result":"safe"}
+2024-01-06T17:00:00Z,req-006,user-128,team-456,compliance_review,https://example.com/image6.jpg,{invalid json}
+2024-01-07T18:00:00Z,req-007,user-129,team-456,authenticity_verification,https://example.com/image7.jpg,{"result":"verified"}
+2024-01-08T19:00:00Z,req-001,user-130,team-456,sentiment_analysis,https://example.com/image8.jpg,{"sentiment":"positive"}

@@ -1,7 +1,9 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { healthCheckSchema, userSchema } from '@monorepo/shared';
 import { Pool } from 'pg';
+import { importRoutes } from './routes/import.routes.js';
 
 const fastify = Fastify({
   logger: true,
@@ -10,6 +12,13 @@ const fastify = Fastify({
 // CORS configuration
 await fastify.register(cors, {
   origin: true,
+});
+
+// Multipart support for file uploads
+await fastify.register(multipart, {
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max file size
+  },
 });
 
 // Database connection
@@ -103,6 +112,9 @@ fastify.post('/users', async (request, reply) => {
     });
   }
 });
+
+// Import routes
+await importRoutes(fastify, pool);
 
 // Start server
 const start = async () => {
