@@ -11,11 +11,16 @@
   },
   "dependencies": {
     "@monorepo/shared": "workspace:*",
+    "axios": "^1.6.5",
     "bullmq": "^5.1.6",
-    "ioredis": "^5.3.2"
+    "ioredis": "^5.3.2",
+    "pg": "^8.11.3",
+    "prom-client": "^15.1.0",
+    "sharp": "^0.33.2"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",
+    "@types/pg": "^8.10.9",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }

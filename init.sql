@@ -83,3 +83,32 @@ CREATE INDEX IF NOT EXISTS idx_import_rows_job_id ON import_rows(import_job_id);
 CREATE INDEX IF NOT EXISTS idx_import_rows_status ON import_rows(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_request_id ON tasks(request_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+
+-- Assets table for link health tracking
+CREATE TABLE IF NOT EXISTS assets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    request_id VARCHAR(255) UNIQUE NOT NULL,
+    url TEXT NOT NULL,
+    link_status VARCHAR(50),
+    latency_ms INTEGER,
+    content_type VARCHAR(255),
+    content_length BIGINT,
+    headers JSONB,
+    error_message TEXT,
+    last_checked_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT check_link_status CHECK (link_status IN (
+        'ok', '404', '403', 'timeout', 'invalid_mime', 
+        'decode_error', 'expired_presign', 'network_error', 'pending'
+    ))
+);
+
+CREATE INDEX IF NOT EXISTS idx_assets_request_id ON assets(request_id);
+CREATE INDEX IF NOT EXISTS idx_assets_link_status ON assets(link_status);
+CREATE INDEX IF NOT EXISTS idx_assets_last_checked ON assets(last_checked_at DESC);
+
+CREATE TRIGGER update_assets_updated_at 
+    BEFORE UPDATE ON assets
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_updated_at_column();

@@ -1,6 +1,10 @@
 import { Worker, Job } from 'bullmq';
 import Redis from 'ioredis';
+import { Pool } from 'pg';
 import { taskSchema, type Task } from '@monorepo/shared';
+import { LinkHealthQueue } from './queues/link-health.queue.js';
+import { getMetrics, getLinkErrorRate, get95thPercentileLatency } from './metrics/prometheus.js';
+import http from 'http';
 
 // Redis connection
 const connection = new Redis({
@@ -8,6 +12,18 @@ const connection = new Redis({
   port: parseInt(process.env.REDIS_PORT || '6379'),
   maxRetriesPerRequest: null,
 });
+
+// Database connection
+const pool = new Pool({
+  host: process.env.POSTGRES_HOST || 'localhost',
+  port: parseInt(process.env.POSTGRES_PORT || '5432'),
+  database: process.env.POSTGRES_DB || 'monorepo',
+  user: process.env.POSTGRES_USER || 'postgres',
+  password: process.env.POSTGRES_PASSWORD || 'postgres',
+});
+
+// Initialize link health queue
+const linkHealthQueue = new LinkHealthQueue(connection, pool);
 
 // Worker processor
 const processTask = async (job: Job<Task>) => {
@@ -83,21 +99,62 @@ worker.on('error', (err) => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, closing worker...');
+const shutdown = async (signal: string) => {
+  console.log(`${signal} received, shutting down gracefully...`);
+  
+  // Close metrics server
+  metricsServer.close();
+  
+  // Close workers
   await worker.close();
+  await linkHealthQueue.close();
+  
+  // Close connections
   await connection.quit();
+  await pool.end();
+  
+  console.log('Shutdown complete');
   process.exit(0);
-});
+};
 
-process.on('SIGINT', async () => {
-  console.log('SIGINT received, closing worker...');
-  await worker.close();
-  await connection.quit();
-  process.exit(0);
-});
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 console.log('Worker started, waiting for jobs...');
+
+// Metrics HTTP server
+const metricsServer = http.createServer(async (req, res) => {
+  if (req.url === '/metrics') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(await getMetrics());
+  } else if (req.url === '/health') {
+    const errorRate = await getLinkErrorRate();
+    const latency95p = await get95thPercentileLatency();
+    const stats = await linkHealthQueue.getStats();
+    
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        status: 'healthy',
+        metrics: {
+          errorRate,
+          latency95p,
+          queueStats: stats,
+        },
+      })
+    );
+  } else {
+    res.writeHead(404);
+    res.end('Not found');
+  }
+});
+
+const metricsPort = parseInt(process.env.METRICS_PORT || '9090');
+metricsServer.listen(metricsPort, () => {
+  console.log(`Metrics server running on http://localhost:${metricsPort}`);
+  console.log(`  - Prometheus metrics: http://localhost:${metricsPort}/metrics`);
+  console.log(`  - Health check: http://localhost:${metricsPort}/health`);
+});
 
 // Example: Add a sample job (for testing)
 // Uncomment the function below to add a sample job on startup
