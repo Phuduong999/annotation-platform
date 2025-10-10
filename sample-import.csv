@@ -1,0 +1,7 @@
+date,request_id,user_id,team_id,type,user_input,raw_ai_output
+2025-10-09T10:00:00Z,req_test_001,user_999,team_test,meal,https://example.com/images/test001.jpg,"{""classification"": ""meal"", ""confidence"": 0.96, ""tags"": [""test"", ""meal""]}"
+2025-10-09T11:00:00Z,req_test_002,user_999,team_test,label,https://example.com/images/test002.jpg,"{""classification"": ""safe"", ""confidence"": 0.88, ""tags"": [""test"", ""safe""]}"
+2025-10-09T12:00:00Z,req_test_003,user_999,team_test,front_label,https://example.com/images/test003.jpg,"{""classification"": ""high_quality"", ""confidence"": 0.75, ""tags"": [""test"", ""quality""]}"
+2025-10-09T13:00:00Z,req_test_004,user_999,team_test,screenshot,https://example.com/images/test004.jpg,"{""classification"": ""compliant"", ""confidence"": 0.92, ""tags"": [""test"", ""compliance""]}"
+2025-10-09T14:00:00Z,req_test_005,user_999,team_test,others,https://example.com/images/test005.jpg,"{""classification"": ""authentic"", ""confidence"": 0.89, ""tags"": [""test"", ""verified""]}"
+2025-10-09T15:00:00Z,req_test_006,user_999,team_test,meal,https://example.com/images/test006.jpg,"{""classification"": ""positive"", ""confidence"": 0.91, ""tags"": [""test"", ""sentiment""]}"

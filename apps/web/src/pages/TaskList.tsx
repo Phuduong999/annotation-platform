@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useDisclosure } from '@mantine/hooks';
 import {
   Container,
   Title,
@@ -13,10 +14,14 @@ import {
   Stack,
   Loader,
   Center,
+  Drawer,
+  ScrollArea,
+  Divider,
+  Code,
 } from '@mantine/core';
 import { DataTable } from 'mantine-datatable';
 import { notifications } from '@mantine/notifications';
-import { IconRefresh, IconEye, IconPlayerPlay } from '@tabler/icons-react';
+import { IconRefresh, IconEye, IconPlayerPlay, IconUpload } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { taskService } from '../services/task.service';
 import { Task, TaskFilter } from '../types/task.types';
@@ -28,12 +33,14 @@ export function TaskList() {
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<TaskFilter>({});
   const [selectedRecords, setSelectedRecords] = useState<Task[]>([]);
+  const [opened, { open, close }] = useDisclosure(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   // Mock current user - in real app this would come from auth context
   const currentUser = 'user123';
 
   // Fetch tasks
-  const { data: tasks = [], isLoading, refetch } = useQuery({
+  const { data: tasks = [], isLoading, refetch, isFetched } = useQuery({
     queryKey: ['tasks', filter],
     queryFn: () => taskService.getTasks({
       ...filter,
@@ -87,14 +94,16 @@ export function TaskList() {
 
   const getTypeColor = (type: Task['type']) => {
     switch (type) {
-      case 'explicit':
-        return 'red';
-      case 'adult':
-        return 'orange';
-      case 'suggestive':
-        return 'yellow';
-      case 'medical':
+      case 'meal':
+        return 'green';
+      case 'label':
         return 'blue';
+      case 'front_label':
+        return 'cyan';
+      case 'screenshot':
+        return 'purple';
+      case 'others':
+        return 'gray';
       default:
         return 'gray';
     }
@@ -181,7 +190,10 @@ export function TaskList() {
           <Button
             size="xs"
             variant="subtle"
-            onClick={() => navigate(`/tasks/${task.id}`)}
+            onClick={() => {
+              setSelectedTask(task);
+              open();
+            }}
             leftSection={<IconEye size={16} />}
           >
             View
@@ -191,7 +203,8 @@ export function TaskList() {
     },
   ];
 
-  const paginatedTasks = tasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // DataTable handles pagination internally, no need to slice
+  const totalRecords = tasks.length;
 
   return (
     <Container size="xl" py="md">
@@ -207,6 +220,13 @@ export function TaskList() {
             )}
           </div>
           <Group>
+            <Button
+              variant="filled"
+              leftSection={<IconUpload size={20} />}
+              onClick={() => navigate('/import')}
+            >
+              Import CSV
+            </Button>
             <Button
               variant="light"
               leftSection={<IconPlayerPlay size={20} />}
@@ -248,10 +268,11 @@ export function TaskList() {
               placeholder="All types"
               data={[
                 { value: '', label: 'All types' },
-                { value: 'explicit', label: 'Explicit' },
-                { value: 'adult', label: 'Adult' },
-                { value: 'suggestive', label: 'Suggestive' },
-                { value: 'medical', label: 'Medical' },
+                { value: 'meal', label: 'Meal' },
+                { value: 'label', label: 'Label' },
+                { value: 'front_label', label: 'Front Label' },
+                { value: 'screenshot', label: 'Screenshot' },
+                { value: 'others', label: 'Others' },
               ]}
               value={filter.type || ''}
               onChange={(value) => setFilter({ ...filter, type: value as Task['type'] || undefined })}
@@ -283,23 +304,157 @@ export function TaskList() {
             <DataTable
               striped
               highlightOnHover
-              records={paginatedTasks}
+              records={tasks}
               columns={columns}
               selectedRecords={selectedRecords}
               onSelectedRecordsChange={setSelectedRecords}
-              totalRecords={tasks.length}
+              totalRecords={totalRecords}
               recordsPerPage={PAGE_SIZE}
               page={page}
               onPageChange={setPage}
               paginationText={({ from, to, totalRecords }) =>
                 `Showing ${from} to ${to} of ${totalRecords} tasks`
               }
-              noRecordsText="No tasks found"
+              noRecordsText={tasks.length === 0 && !isLoading ? 'No tasks found' : ''}
+              noRecordsIcon={<div />}
               minHeight={400}
             />
           )}
         </Card>
       </Stack>
+
+      {/* Task Detail Drawer */}
+      <Drawer
+        opened={opened}
+        onClose={close}
+        title={<Text fw={600}>Task Details</Text>}
+        position="right"
+        size="xl"
+        overlayProps={{ opacity: 0.5, blur: 4 }}
+        scrollAreaComponent={ScrollArea.Autosize}
+      >
+        {selectedTask && (
+          <Stack gap="md">
+            {/* Basic Info */}
+            <div>
+              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
+                Basic Information
+              </Text>
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>ID</Text>
+                  <Code>{selectedTask.id}</Code>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>Request ID</Text>
+                  <Code>{selectedTask.request_id}</Code>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>Status</Text>
+                  <Badge color={getStatusColor(selectedTask.status)}>
+                    {selectedTask.status.replace('_', ' ')}
+                  </Badge>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>Type</Text>
+                  <Badge color={getTypeColor(selectedTask.type)}>
+                    {selectedTask.type}
+                  </Badge>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>AI Confidence</Text>
+                  <Text size="sm">{(selectedTask.ai_confidence * 100).toFixed(1)}%</Text>
+                </Group>
+              </Stack>
+            </div>
+
+            <Divider />
+
+            {/* User & Team Info */}
+            <div>
+              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
+                User & Team
+              </Text>
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>User ID</Text>
+                  <Code>{selectedTask.user_id}</Code>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>Team ID</Text>
+                  <Code>{selectedTask.team_id}</Code>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>Assigned To</Text>
+                  <Text size="sm">{selectedTask.assigned_to || 'Unassigned'}</Text>
+                </Group>
+              </Stack>
+            </div>
+
+            <Divider />
+
+            {/* User Input */}
+            <div>
+              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
+                User Input
+              </Text>
+              <Code block>{selectedTask.user_input}</Code>
+            </div>
+
+            <Divider />
+
+            {/* AI Output */}
+            <div>
+              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
+                Raw AI Output
+              </Text>
+              <Code block style={{ whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(selectedTask.raw_ai_output, null, 2)}
+              </Code>
+            </div>
+
+            <Divider />
+
+            {/* Timestamps */}
+            <div>
+              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
+                Timestamps
+              </Text>
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>Scan Date</Text>
+                  <Text size="sm">{new Date(selectedTask.scan_date).toLocaleString()}</Text>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>Created At</Text>
+                  <Text size="sm">{new Date(selectedTask.created_at).toLocaleString()}</Text>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" fw={500}>Updated At</Text>
+                  <Text size="sm">{new Date(selectedTask.updated_at).toLocaleString()}</Text>
+                </Group>
+                {selectedTask.assigned_at && (
+                  <Group justify="space-between">
+                    <Text size="sm" fw={500}>Assigned At</Text>
+                    <Text size="sm">{new Date(selectedTask.assigned_at).toLocaleString()}</Text>
+                  </Group>
+                )}
+              </Stack>
+            </div>
+
+            {/* Actions */}
+            <Divider />
+            <Group justify="flex-end">
+              <Button variant="light" onClick={close}>
+                Close
+              </Button>
+              <Button onClick={() => navigate(`/tasks/${selectedTask.id}`)}>
+                Edit Task
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Drawer>
     </Container>
   );
 }

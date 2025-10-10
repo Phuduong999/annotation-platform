@@ -7,7 +7,7 @@ export interface Task {
   request_id: string;
   user_id: string;
   team_id: string;
-  type: 'explicit' | 'adult' | 'suggestive' | 'medical';
+  type: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
   user_input: string;
   raw_ai_output: string;
   ai_confidence: number;
@@ -89,7 +89,7 @@ export interface ParsedAIOutput {
 }
 
 export interface TaskAnnotation {
-  classification: 'explicit' | 'adult' | 'suggestive' | 'medical' | 'safe';
+  classification: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others' | 'safe';
   tags: string[];
   nutrition?: NutritionData;
 }

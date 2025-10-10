@@ -174,7 +174,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
         const manifest = generateManifest(
           snapshot,
           statistics,
-          { classifications: ['explicit', 'adult', 'suggestive', 'medical', 'safe'] }
+          { classifications: ['meal', 'label', 'front_label', 'screenshot', 'others', 'safe'] }
         );
 
         const manifestChecksum = generateChecksum(JSON.stringify(manifest));

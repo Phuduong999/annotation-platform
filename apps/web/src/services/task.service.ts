@@ -19,7 +19,12 @@ export class TaskService {
     }
 
     const response = await axios.get(`${this.apiUrl}/tasks?${params.toString()}`);
-    return response.data.data;
+    // Handle new response format with pagination
+    if (response.data.data?.tasks) {
+      return response.data.data.tasks;
+    }
+    // Fallback to old format if needed
+    return response.data.data || [];
   }
 
   async getTask(id: string): Promise<Task> {

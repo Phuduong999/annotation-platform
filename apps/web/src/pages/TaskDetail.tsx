@@ -82,7 +82,7 @@ export function TaskDetail() {
     validate: {
       classification: (value) => {
         if (!value) return 'Classification is required';
-        const validValues = ['explicit', 'adult', 'suggestive', 'medical', 'safe'];
+        const validValues = ['meal', 'label', 'front_label', 'screenshot', 'others', 'safe'];
         if (!validValues.includes(value)) return 'Invalid classification';
         return null;
       },
@@ -99,7 +99,7 @@ export function TaskDetail() {
         nutrition: task.result.nutrition || parsedAI.nutrition,
       });
     } else if (parsedAI.classification) {
-      const validClassifications: TaskAnnotation['classification'][] = ['explicit', 'adult', 'suggestive', 'medical', 'safe'];
+      const validClassifications: TaskAnnotation['classification'][] = ['meal', 'label', 'front_label', 'screenshot', 'others', 'safe'];
       const classification = validClassifications.includes(parsedAI.classification as any) 
         ? parsedAI.classification as TaskAnnotation['classification']
         : 'safe';
@@ -265,10 +265,11 @@ export function TaskDetail() {
   });
 
   useHotkeys('1', () => form.setFieldValue('classification', 'safe'));
-  useHotkeys('2', () => form.setFieldValue('classification', 'suggestive'));
-  useHotkeys('3', () => form.setFieldValue('classification', 'adult'));
-  useHotkeys('4', () => form.setFieldValue('classification', 'explicit'));
-  useHotkeys('5', () => form.setFieldValue('classification', 'medical'));
+  useHotkeys('2', () => form.setFieldValue('classification', 'meal'));
+  useHotkeys('3', () => form.setFieldValue('classification', 'label'));
+  useHotkeys('4', () => form.setFieldValue('classification', 'front_label'));
+  useHotkeys('5', () => form.setFieldValue('classification', 'screenshot'));
+  useHotkeys('6', () => form.setFieldValue('classification', 'others'));
 
   if (isLoading) {
     return (
@@ -309,7 +310,7 @@ export function TaskDetail() {
             </Group>
             <Group>
               <Text size="xs" c="dimmed">
-                Hotkeys: 1-5 (classification) • ⌘+S (save) • ⌘+Enter (submit) • ⌘+Shift+S (skip)
+                Hotkeys: 1-6 (classification) • ⌘+S (save) • ⌘+Enter (submit) • ⌘+Shift+S (skip)
               </Text>
             </Group>
           </Group>
@@ -419,10 +420,11 @@ export function TaskDetail() {
                         placeholder="Select classification"
                         data={[
                           { value: 'safe', label: 'Safe (1)' },
-                          { value: 'suggestive', label: 'Suggestive (2)' },
-                          { value: 'adult', label: 'Adult (3)' },
-                          { value: 'explicit', label: 'Explicit (4)' },
-                          { value: 'medical', label: 'Medical (5)' },
+                          { value: 'meal', label: 'Meal (2)' },
+                          { value: 'label', label: 'Label (3)' },
+                          { value: 'front_label', label: 'Front Label (4)' },
+                          { value: 'screenshot', label: 'Screenshot (5)' },
+                          { value: 'others', label: 'Others (6)' },
                         ]}
                         {...form.getInputProps('classification')}
                         required

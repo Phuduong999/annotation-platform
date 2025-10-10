@@ -205,7 +205,7 @@ export function generateManifest(
     created_at: snapshot.created_at,
     
     ontology: {
-      classifications: ontology.classifications || ['explicit', 'adult', 'suggestive', 'medical', 'safe'],
+      classifications: ontology.classifications || ['meal', 'label', 'front_label', 'screenshot', 'others', 'safe'],
       tags: ontology.tags || [],
       fields: [
         {

@@ -1,0 +1,4 @@
+request id,user id,team id,user input,raw ai output,date,type
+req-test-001,user-123,team-456,https://example.com/image1.jpg,"{""result"": ""safe""}",2025-01-15T10:00:00Z,content_moderation
+req-test-002,user-123,team-456,https://example.com/image2.jpg,"{""result"": ""approved""}",2025-01-15T11:00:00Z,safety_check
+req-test-003,user-789,team-456,https://example.com/image3.jpg,"{""status"": ""pass""}",2025-01-15T12:00:00Z,quality_assessment
