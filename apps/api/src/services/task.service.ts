@@ -1,5 +1,13 @@
 import { Pool } from 'pg';
 import { ScanTypeEnum } from '@monorepo/shared';
+import {
+  TaskStatus,
+  TaskEventType,
+  AnnotationRequest,
+  TaskWithAnnotations,
+  LabelsDraft,
+  LabelsFinal,
+} from '../types/annotation.types.js';
 
 export interface TaskCreationResult {
   totalRows: number;
@@ -362,5 +370,377 @@ export class TaskService {
 
     const result = await this.pool.query(query, params);
     return result.rows;
+  }
+
+  /**
+   * Start working on a task
+   */
+  async startTask(taskId: string, userId: string): Promise<TaskWithAnnotations> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get task with current status
+      const taskResult = await client.query(
+        `SELECT t.*, ld.payload as draft_payload, lf.* as final_data
+         FROM tasks t
+         LEFT JOIN labels_draft ld ON ld.task_id = t.id
+         LEFT JOIN labels_final lf ON lf.task_id = t.id
+         WHERE t.id = $1
+         FOR UPDATE`,
+        [taskId]
+      );
+
+      if (taskResult.rows.length === 0) {
+        throw new Error('Task not found');
+      }
+
+      const task = taskResult.rows[0];
+
+      // Check if task can be started
+      if (task.status === 'completed' || task.status === 'skipped') {
+        throw new Error(`Task is already ${task.status}`);
+      }
+
+      // Check if already in progress by another user
+      if (task.status === 'in_progress' && task.assigned_to !== userId) {
+        throw new Error(`Task is already in progress by user ${task.assigned_to}`);
+      }
+
+      // If already in progress by same user, just return task
+      if (task.status === 'in_progress' && task.assigned_to === userId) {
+        await client.query('COMMIT');
+        return this.buildTaskWithAnnotations(task);
+      }
+
+      // Update task status
+      const updateResult = await client.query(
+        `UPDATE tasks 
+         SET status = 'in_progress', 
+             assigned_to = $1, 
+             assigned_at = CASE WHEN assigned_at IS NULL THEN NOW() ELSE assigned_at END,
+             started_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [userId, taskId]
+      );
+
+      const updatedTask = updateResult.rows[0];
+
+      // Log task event
+      await this.logTaskEvent(client, taskId, 'start', userId, {
+        previous_status: task.status,
+        assigned_to: userId,
+      });
+
+      // If this is auto-assignment (task was pending), log assignment
+      if (task.status === 'pending') {
+        await client.query(
+          `INSERT INTO task_assignments (task_id, assigned_to, assignment_method, priority_score)
+           VALUES ($1, $2, 'pull_queue', $3)`,
+          [taskId, userId, task.ai_confidence || 0]
+        );
+      }
+
+      await client.query('COMMIT');
+      return this.buildTaskWithAnnotations(updatedTask);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Save annotation draft
+   */
+  async saveAnnotationDraft(
+    taskId: string, 
+    annotation: AnnotationRequest, 
+    userId: string
+  ): Promise<LabelsDraft> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verify task is in progress by this user
+      await this.verifyTaskOwnership(client, taskId, userId);
+
+      // Upsert draft annotation
+      const result = await client.query(
+        `INSERT INTO labels_draft (task_id, payload, updated_by, updated_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (task_id) 
+         DO UPDATE SET payload = EXCLUDED.payload, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+         RETURNING *`,
+        [taskId, JSON.stringify(annotation), userId]
+      );
+
+      // Log task event
+      await this.logTaskEvent(client, taskId, 'annotate_draft', userId, annotation);
+
+      await client.query('COMMIT');
+      return {
+        ...result.rows[0],
+        payload: annotation,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Submit final task annotation
+   */
+  async submitTaskAnnotation(
+    taskId: string,
+    annotation: AnnotationRequest,
+    userId: string,
+    idempotencyKey?: string
+  ): Promise<TaskWithAnnotations> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Check idempotency key if provided
+      if (idempotencyKey) {
+        const existingResult = await client.query(
+          `SELECT task_id FROM task_events 
+           WHERE task_id = $1 AND type = 'submit' AND meta->>'idempotency_key' = $2`,
+          [taskId, idempotencyKey]
+        );
+        
+        if (existingResult.rows.length > 0) {
+          // Already submitted with this key, return existing result
+          const taskResult = await client.query(
+            `SELECT t.*, ld.payload as draft_payload, lf.* as final_data
+             FROM tasks t
+             LEFT JOIN labels_draft ld ON ld.task_id = t.id
+             LEFT JOIN labels_final lf ON lf.task_id = t.id
+             WHERE t.id = $1`,
+            [taskId]
+          );
+          
+          await client.query('COMMIT');
+          return this.buildTaskWithAnnotations(taskResult.rows[0]);
+        }
+      }
+
+      // Verify task is in progress by this user
+      const task = await this.verifyTaskOwnership(client, taskId, userId);
+
+      // Calculate duration
+      let durationMs: number | null = null;
+      if (task.started_at) {
+        durationMs = Date.now() - new Date(task.started_at).getTime();
+      }
+
+      // Save final annotation
+      await client.query(
+        `INSERT INTO labels_final 
+         (task_id, scan_type, result_return, feedback_correction, note, created_by, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (task_id) 
+         DO UPDATE SET 
+           scan_type = EXCLUDED.scan_type,
+           result_return = EXCLUDED.result_return,
+           feedback_correction = EXCLUDED.feedback_correction,
+           note = EXCLUDED.note,
+           created_by = EXCLUDED.created_by,
+           created_at = NOW()`,
+        [
+          taskId,
+          annotation.scan_type,
+          annotation.result_return,
+          annotation.feedback_correction,
+          annotation.note,
+          userId,
+        ]
+      );
+
+      // Update task status to completed
+      const taskResult = await client.query(
+        `UPDATE tasks 
+         SET status = 'completed', completed_at = NOW(), duration_ms = $1, updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [durationMs, taskId]
+      );
+
+      // Clear draft
+      await client.query(
+        'DELETE FROM labels_draft WHERE task_id = $1',
+        [taskId]
+      );
+
+      // Log task event
+      await this.logTaskEvent(client, taskId, 'submit', userId, {
+        ...annotation,
+        duration_ms: durationMs,
+        idempotency_key: idempotencyKey,
+      });
+
+      await client.query('COMMIT');
+      return this.buildTaskWithAnnotations(taskResult.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Skip a task
+   */
+  async skipTask(taskId: string, userId: string, reasonCode?: string): Promise<{ task: TaskWithAnnotations; nextTask?: any }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get task
+      const task = await this.verifyTaskOwnership(client, taskId, userId, false); // Allow skip even if not assigned to user
+
+      // Determine skip policy (for now, return to queue)
+      const returnToQueue = true; // This could be configurable
+      
+      let newStatus: TaskStatus;
+      let updatedTask;
+      
+      if (returnToQueue) {
+        // Return to pending queue
+        const result = await client.query(
+          `UPDATE tasks 
+           SET status = 'pending', assigned_to = NULL, assigned_at = NULL, started_at = NULL, updated_at = NOW()
+           WHERE id = $1
+           RETURNING *`,
+          [taskId]
+        );
+        newStatus = 'pending';
+        updatedTask = result.rows[0];
+      } else {
+        // Mark as permanently skipped
+        const result = await client.query(
+          `UPDATE tasks 
+           SET status = 'skipped', updated_at = NOW()
+           WHERE id = $1
+           RETURNING *`,
+          [taskId]
+        );
+        newStatus = 'skipped';
+        updatedTask = result.rows[0];
+      }
+
+      // Log assignment as skip
+      await client.query(
+        `INSERT INTO task_assignments (task_id, assigned_to, assignment_method, priority_score)
+         VALUES ($1, $2, 'skip', $3)`,
+        [taskId, userId, task.ai_confidence || 0]
+      );
+
+      // Log task event
+      await this.logTaskEvent(client, taskId, 'skip', userId, {
+        reason_code: reasonCode,
+        previous_status: task.status,
+        return_to_queue: returnToQueue,
+        new_status: newStatus,
+      });
+
+      // Clear any draft
+      await client.query('DELETE FROM labels_draft WHERE task_id = $1', [taskId]);
+
+      await client.query('COMMIT');
+      
+      return {
+        task: this.buildTaskWithAnnotations(updatedTask),
+        nextTask: null, // Could implement getting next task here
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Verify task ownership
+   */
+  private async verifyTaskOwnership(
+    client: any, 
+    taskId: string, 
+    userId: string, 
+    requireOwnership: boolean = true
+  ): Promise<any> {
+    const result = await client.query(
+      `SELECT * FROM tasks WHERE id = $1`,
+      [taskId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Task not found');
+    }
+
+    const task = result.rows[0];
+
+    if (requireOwnership) {
+      if (task.status !== 'in_progress') {
+        throw new Error(`Task must be in progress to perform this action. Current status: ${task.status}`);
+      }
+
+      if (task.assigned_to !== userId) {
+        throw new Error('Task is not assigned to this user');
+      }
+    }
+
+    return task;
+  }
+
+  /**
+   * Log task event
+   */
+  private async logTaskEvent(
+    client: any,
+    taskId: string,
+    eventType: TaskEventType,
+    userId: string,
+    meta?: Record<string, any>
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO task_events (task_id, type, user_id, meta, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [taskId, eventType, userId, meta ? JSON.stringify(meta) : null]
+    );
+  }
+
+  /**
+   * Build task with annotations
+   */
+  private buildTaskWithAnnotations(task: any): TaskWithAnnotations {
+    return {
+      ...task,
+      draft: task.draft_payload ? {
+        id: task.draft_id,
+        task_id: task.id,
+        payload: task.draft_payload,
+        updated_by: task.draft_updated_by,
+        updated_at: task.draft_updated_at,
+      } : undefined,
+      final: task.final_data ? {
+        id: task.final_id,
+        task_id: task.id,
+        scan_type: task.final_scan_type,
+        result_return: task.final_result_return,
+        feedback_correction: task.final_feedback_correction,
+        note: task.final_note,
+        created_by: task.final_created_by,
+        created_at: task.final_created_at,
+      } : undefined,
+    };
   }
 }

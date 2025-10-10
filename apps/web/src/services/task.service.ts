@@ -1,6 +1,24 @@
 import axios from 'axios';
 import { Task, TaskStats, TaskFilter, TaskAnnotation } from '../types/task.types';
 
+// New annotation types
+export interface AnnotationRequest {
+  scan_type: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
+  result_return: 'correct_result' | 'wrong_result' | 'no_result';
+  feedback_correction: 'wrong_food' | 'incorrect_nutrition' | 'incorrect_ingredients' | 'wrong_portion_size';
+  note?: string;
+  draft?: boolean;
+}
+
+export interface StartTaskRequest {
+  user_id: string;
+}
+
+export interface SkipTaskRequest {
+  user_id: string;
+  reason_code?: string;
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 export class TaskService {
@@ -72,6 +90,74 @@ export class TaskService {
   async skipTask(taskId: string, reason?: string): Promise<Task> {
     const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/skip`, { reason });
     return response.data.data;
+  }
+
+  // NEW ANNOTATION METHODS
+
+  async startTask(taskId: string, userId: string): Promise<Task> {
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/start`, {
+      user_id: userId,
+    });
+    return response.data.data;
+  }
+
+  async saveAnnotationDraft(taskId: string, annotation: AnnotationRequest): Promise<any> {
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/annotate`, {
+      ...annotation,
+      draft: true,
+    });
+    return response.data.data;
+  }
+
+  async submitTaskAnnotation(
+    taskId: string, 
+    annotation: AnnotationRequest, 
+    idempotencyKey?: string
+  ): Promise<Task> {
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) {
+      headers['idempotency-key'] = idempotencyKey;
+    }
+    
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/submit`, annotation, {
+      headers,
+    });
+    return response.data.data;
+  }
+
+  async skipTaskNew(taskId: string, request: SkipTaskRequest): Promise<{ task: Task; nextTask?: Task }> {
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/skip`, request);
+    return response.data.data;
+  }
+
+  // Auto-save draft with debouncing helper
+  private draftSaveTimeouts: Map<string, NodeJS.Timeout> = new Map();
+
+  saveDraftDebounced(taskId: string, annotation: AnnotationRequest, delayMs: number = 1000): void {
+    // Clear existing timeout for this task
+    const existingTimeout = this.draftSaveTimeouts.get(taskId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+
+    // Set new timeout
+    const timeout = setTimeout(async () => {
+      try {
+        await this.saveAnnotationDraft(taskId, annotation);
+        console.log(`Draft saved for task ${taskId}`);
+      } catch (error) {
+        console.error(`Failed to save draft for task ${taskId}:`, error);
+      } finally {
+        this.draftSaveTimeouts.delete(taskId);
+      }
+    }, delayMs);
+
+    this.draftSaveTimeouts.set(taskId, timeout);
+  }
+
+  // Generate idempotency key for submit
+  generateIdempotencyKey(taskId: string): string {
+    return `${taskId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 }
 

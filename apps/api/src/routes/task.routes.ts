@@ -1,6 +1,15 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { Pool } from 'pg';
 import { TaskService } from '../services/task.service.js';
+import {
+  StartTaskRequest,
+  AnnotationRequest,
+  SkipTaskRequest,
+  validateAnnotation,
+  SCAN_TYPES,
+  RESULT_RETURNS,
+  FEEDBACK_CORRECTIONS,
+} from '../types/annotation.types.js';
 
 export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
   const taskService = new TaskService(pool);
@@ -385,7 +394,7 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
           type: 'object',
           properties: {
             user_id: { type: 'string' },
-            method: { type: 'string', enum: ['equal_split', 'pull_queue'] },
+            method: { type: 'string', enum: ['equal_split', 'pull_queue', 'skip'] },
             limit: { type: 'number' },
           },
         },
@@ -411,6 +420,254 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         return reply.code(200).send({
           success: true,
           data: logs,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
+  // PUT /tasks/:id/start - Start working on a task
+  fastify.put(
+    '/tasks/:id/start',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['user_id'],
+          properties: {
+            user_id: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: { id: string };
+        Body: StartTaskRequest;
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { id } = request.params;
+        const { user_id } = request.body;
+
+        const task = await taskService.startTask(id, user_id);
+
+        return reply.code(200).send({
+          success: true,
+          data: task,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        
+        // Handle specific conflict case
+        if (error instanceof Error && error.message.includes('already in progress')) {
+          return reply.code(409).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
+  // PUT /tasks/:id/annotate - Save draft annotation
+  fastify.put(
+    '/tasks/:id/annotate',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['scan_type', 'result_return', 'feedback_correction'],
+          properties: {
+            scan_type: { type: 'string', enum: SCAN_TYPES },
+            result_return: { type: 'string', enum: RESULT_RETURNS },
+            feedback_correction: { type: 'string', enum: FEEDBACK_CORRECTIONS },
+            note: { type: 'string' },
+            draft: { type: 'boolean', default: true },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: { id: string };
+        Body: AnnotationRequest;
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { id } = request.params;
+        const annotation = request.body;
+        
+        // Validate annotation
+        const errors = validateAnnotation(annotation);
+        if (errors.length > 0) {
+          return reply.code(400).send({
+            success: false,
+            error: 'Validation failed',
+            details: errors,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const result = await taskService.saveAnnotationDraft(id, annotation, request.headers['x-user-id'] as string || 'unknown');
+
+        return reply.code(200).send({
+          success: true,
+          data: result,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
+  // PUT /tasks/:id/submit - Submit final annotation
+  fastify.put(
+    '/tasks/:id/submit',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['scan_type', 'result_return', 'feedback_correction'],
+          properties: {
+            scan_type: { type: 'string', enum: SCAN_TYPES },
+            result_return: { type: 'string', enum: RESULT_RETURNS },
+            feedback_correction: { type: 'string', enum: FEEDBACK_CORRECTIONS },
+            note: { type: 'string' },
+          },
+        },
+        headers: {
+          type: 'object',
+          properties: {
+            'idempotency-key': { type: 'string' },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: { id: string };
+        Body: AnnotationRequest;
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { id } = request.params;
+        const annotation = request.body;
+        const idempotencyKey = request.headers['idempotency-key'] as string;
+        const userId = request.headers['x-user-id'] as string || 'unknown';
+        
+        // Validate annotation
+        const errors = validateAnnotation(annotation);
+        if (errors.length > 0) {
+          return reply.code(400).send({
+            success: false,
+            error: 'Validation failed - all 3 enum fields are required',
+            details: errors,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const result = await taskService.submitTaskAnnotation(id, annotation, userId, idempotencyKey);
+
+        return reply.code(200).send({
+          success: true,
+          data: result,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
+  // PUT /tasks/:id/skip - Skip a task
+  fastify.put(
+    '/tasks/:id/skip',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['user_id'],
+          properties: {
+            user_id: { type: 'string' },
+            reason_code: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: { id: string };
+        Body: SkipTaskRequest;
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { id } = request.params;
+        const { user_id, reason_code } = request.body;
+
+        const result = await taskService.skipTask(id, user_id, reason_code);
+
+        return reply.code(200).send({
+          success: true,
+          data: result,
           timestamp: new Date().toISOString(),
         });
       } catch (error) {
