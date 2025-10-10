@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDisclosure } from '@mantine/hooks';
 import {
@@ -18,35 +18,241 @@ import {
   ScrollArea,
   Divider,
   Code,
+  Table,
+  Pagination,
+  Menu,
+  Checkbox,
 } from '@mantine/core';
-import { DataTable } from 'mantine-datatable';
 import { notifications } from '@mantine/notifications';
-import { IconRefresh, IconEye, IconPlayerPlay, IconUpload } from '@tabler/icons-react';
+import { IconRefresh, IconEye, IconPlayerPlay, IconUpload, IconColumns } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { taskService } from '../services/task.service';
-import { Task, TaskFilter } from '../types/task.types';
+import { Task, TaskFilter, TaskListResponse } from '../types/task.types';
 
 const PAGE_SIZE = 20;
 
+const STATUS_COLOR_MAP: Record<Task['status'], string> = {
+  pending: 'blue',
+  in_progress: 'yellow',
+  completed: 'green',
+  failed: 'red',
+};
+
+const TYPE_COLOR_MAP: Record<Task['type'], string> = {
+  meal: 'green',
+  label: 'blue',
+  front_label: 'cyan',
+  screenshot: 'purple',
+  others: 'gray',
+};
+
+const getStatusColor = (status: Task['status']) => STATUS_COLOR_MAP[status] ?? 'gray';
+const getTypeColor = (type: Task['type']) => TYPE_COLOR_MAP[type] ?? 'gray';
+
+type ColumnKey =
+  | 'request_id'
+  | 'type'
+  | 'user_input'
+  | 'status'
+  | 'assigned_to'
+  | 'created_at'
+  | 'user_email'
+  | 'logs'
+  | 'raw_json';
+
+interface ColumnDefinition {
+  key: ColumnKey;
+  label: string;
+  defaultVisible: boolean;
+  render: (task: Task) => ReactNode;
+}
+
+const COLUMN_DEFINITIONS: ColumnDefinition[] = [
+  {
+    key: 'request_id',
+    label: 'Request ID',
+    defaultVisible: true,
+    render: (task) => (
+      <Text size="sm" fw={500}>
+        {task.request_id}
+      </Text>
+    ),
+  },
+  {
+    key: 'type',
+    label: 'Type',
+    defaultVisible: true,
+    render: (task) => (
+      <Badge color={getTypeColor(task.type)} size="sm">
+        {task.type}
+      </Badge>
+    ),
+  },
+  {
+    key: 'user_input',
+    label: 'User Input',
+    defaultVisible: true,
+    render: (task) => (
+      <Text size="sm" maw={280} lineClamp={1} title={task.user_input}>
+        {task.user_input}
+      </Text>
+    ),
+  },
+  {
+    key: 'status',
+    label: 'Status',
+    defaultVisible: true,
+    render: (task) => (
+      <Badge color={getStatusColor(task.status)} size="sm">
+        {task.status.replace('_', ' ')}
+      </Badge>
+    ),
+  },
+  {
+    key: 'assigned_to',
+    label: 'Assigned To',
+    defaultVisible: true,
+    render: (task) => (
+      <Text size="sm">{task.assigned_to || '-'}</Text>
+    ),
+  },
+  {
+    key: 'created_at',
+    label: 'Created At',
+    defaultVisible: true,
+    render: (task) => (
+      <Text size="sm">{new Date(task.created_at).toLocaleString()}</Text>
+    ),
+  },
+  {
+    key: 'user_email',
+    label: 'User Email',
+    defaultVisible: false,
+    render: (task) => <Text size="sm">{task.user_email || '-'}</Text>,
+  },
+  {
+    key: 'logs',
+    label: 'Logs',
+    defaultVisible: false,
+    render: (task) => (
+      <Text size="xs" c="dimmed" maw={280} lineClamp={1} title={task.logs || ''}>
+        {task.logs || '-'}
+      </Text>
+    ),
+  },
+  {
+    key: 'raw_json',
+    label: 'Raw JSON',
+    defaultVisible: false,
+    render: (task) => {
+      const value = typeof task.raw_json === 'string' ? task.raw_json : task.raw_json ? JSON.stringify(task.raw_json) : task.raw_ai_output;
+      return (
+        <Text size="xs" c="dimmed" maw={280} lineClamp={1} title={value || ''}>
+          {value || '-'}
+        </Text>
+      );
+    },
+  },
+];
+
+const DEFAULT_VISIBLE_COLUMNS = COLUMN_DEFINITIONS.filter((column) => column.defaultVisible).map(
+  (column) => column.key
+);
+
+const getColumnStorageKey = (userId: string) => `task-list-columns:${userId || 'anonymous'}`;
+
 export function TaskList() {
   const navigate = useNavigate();
-  const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<TaskFilter>({});
-  const [selectedRecords, setSelectedRecords] = useState<Task[]>([]);
   const [opened, { open, close }] = useDisclosure(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-
-  // Mock current user - in real app this would come from auth context
+  const [page, setPage] = useState(1);
   const currentUser = 'user123';
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = window.localStorage.getItem(getColumnStorageKey(currentUser));
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as ColumnKey[];
+          const validKeys = new Set(COLUMN_DEFINITIONS.map((column) => column.key));
+          const filtered = parsed.filter((key): key is ColumnKey => validKeys.has(key));
+          if (filtered.length > 0) {
+            return COLUMN_DEFINITIONS.filter((column) => filtered.includes(column.key)).map(
+              (column) => column.key
+            );
+          }
+        } catch (error) {
+          console.warn('Failed to parse column preferences, falling back to defaults', error);
+        }
+      }
+    }
+    return DEFAULT_VISIBLE_COLUMNS;
+  });
+
+  const updateFilter = (changes: Partial<TaskFilter>) => {
+    setFilter((prev) => ({ ...prev, ...changes }));
+    setPage(1);
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem(
+      getColumnStorageKey(currentUser),
+      JSON.stringify(visibleColumns)
+    );
+  }, [visibleColumns, currentUser]);
+
+  const visibleColumnDefinitions = useMemo(() => {
+    const active = new Set(visibleColumns);
+    return COLUMN_DEFINITIONS.filter((column) => active.has(column.key));
+  }, [visibleColumns]);
+
+  const handleToggleColumn = (key: ColumnKey) => {
+    setVisibleColumns((prev) => {
+      const hasColumn = prev.includes(key);
+      if (hasColumn) {
+        if (prev.length === 1) {
+          return prev;
+        }
+        return prev.filter((column) => column !== key);
+      }
+      const next = [...prev, key];
+      return COLUMN_DEFINITIONS.filter((column) => next.includes(column.key)).map(
+        (column) => column.key
+      );
+    });
+  };
 
   // Fetch tasks
-  const { data: tasks = [], isLoading, refetch, isFetched } = useQuery({
-    queryKey: ['tasks', filter],
-    queryFn: () => taskService.getTasks({
-      ...filter,
-      assigned_to_me: filter.assigned_to_me ? true : undefined,
-    }),
+  const { data: tasksData, isLoading, isFetching, refetch } = useQuery<TaskListResponse>({
+    queryKey: ['tasks', filter, page],
+    queryFn: () =>
+      taskService.getTasks({
+        ...filter,
+        assigned_to_me: filter.assigned_to_me ? true : undefined,
+        has_dislike: filter.has_dislike ? true : undefined,
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
+      }),
+    placeholderData: (previousData) => previousData,
   });
+
+  const tasks = tasksData?.tasks ?? [];
+  const serverPagination = tasksData?.pagination;
+  const totalRecords = serverPagination?.total ?? tasks.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
+  const fromRecord = totalRecords === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const toRecord = totalRecords === 0 ? 0 : Math.min(totalRecords, page * PAGE_SIZE);
+  const showInitialLoader = isLoading && tasks.length === 0;
+  const noDataColSpan = Math.max(1, visibleColumnDefinitions.length) + 1;
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   // Fetch stats
   const { data: stats } = useQuery({
@@ -77,135 +283,6 @@ export function TaskList() {
     }
   };
 
-  const getStatusColor = (status: Task['status']) => {
-    switch (status) {
-      case 'pending':
-        return 'blue';
-      case 'in_progress':
-        return 'yellow';
-      case 'completed':
-        return 'green';
-      case 'failed':
-        return 'red';
-      default:
-        return 'gray';
-    }
-  };
-
-  const getTypeColor = (type: Task['type']) => {
-    switch (type) {
-      case 'meal':
-        return 'green';
-      case 'label':
-        return 'blue';
-      case 'front_label':
-        return 'cyan';
-      case 'screenshot':
-        return 'purple';
-      case 'others':
-        return 'gray';
-      default:
-        return 'gray';
-    }
-  };
-
-  const columns = [
-    {
-      accessor: 'id',
-      title: 'ID',
-      width: 100,
-      render: (task: Task) => (
-        <Text size="xs" c="dimmed">
-          {task.id.slice(0, 8)}...
-        </Text>
-      ),
-    },
-    {
-      accessor: 'request_id',
-      title: 'Request ID',
-      width: 120,
-    },
-    {
-      accessor: 'type',
-      title: 'Type',
-      width: 100,
-      render: (task: Task) => (
-        <Badge color={getTypeColor(task.type)} size="sm">
-          {task.type}
-        </Badge>
-      ),
-    },
-    {
-      accessor: 'status',
-      title: 'Status',
-      width: 100,
-      render: (task: Task) => (
-        <Badge color={getStatusColor(task.status)} size="sm">
-          {task.status.replace('_', ' ')}
-        </Badge>
-      ),
-    },
-    {
-      accessor: 'ai_confidence',
-      title: 'AI Confidence',
-      width: 120,
-      render: (task: Task) => (
-        <Text size="sm">
-          {(task.ai_confidence * 100).toFixed(1)}%
-        </Text>
-      ),
-    },
-    {
-      accessor: 'assigned_to',
-      title: 'Assigned To',
-      width: 120,
-      render: (task: Task) => (
-        <Text size="sm">
-          {task.assigned_to || '-'}
-        </Text>
-      ),
-    },
-    {
-      accessor: 'team_id',
-      title: 'Team',
-      width: 100,
-    },
-    {
-      accessor: 'scan_date',
-      title: 'Scan Date',
-      width: 150,
-      render: (task: Task) => (
-        <Text size="sm">
-          {new Date(task.scan_date).toLocaleDateString()}
-        </Text>
-      ),
-    },
-    {
-      accessor: 'actions',
-      title: 'Actions',
-      width: 100,
-      textAlign: 'center' as const,
-      render: (task: Task) => (
-        <Group gap="xs" justify="center">
-          <Button
-            size="xs"
-            variant="subtle"
-            onClick={() => {
-              setSelectedTask(task);
-              open();
-            }}
-            leftSection={<IconEye size={16} />}
-          >
-            View
-          </Button>
-        </Group>
-      ),
-    },
-  ];
-
-  // DataTable handles pagination internally, no need to slice
-  const totalRecords = tasks.length;
-
   return (
     <Container size="xl" py="md">
       <Stack gap="md">
@@ -234,10 +311,35 @@ export function TaskList() {
             >
               Get Next Task
             </Button>
+            <Menu width={220} withinPortal>
+              <Menu.Target>
+                <Button variant="light" leftSection={<IconColumns size={20} />}>
+                  Columns
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Stack gap="xs" p="xs">
+                  {COLUMN_DEFINITIONS.map((column) => {
+                    const isChecked = visibleColumns.includes(column.key);
+                    const disableToggle = isChecked && visibleColumns.length === 1;
+                    return (
+                      <Checkbox
+                        key={column.key}
+                        label={column.label}
+                        checked={isChecked}
+                        onChange={() => handleToggleColumn(column.key)}
+                        disabled={disableToggle}
+                      />
+                    );
+                  })}
+                </Stack>
+              </Menu.Dropdown>
+            </Menu>
             <Button
               variant="subtle"
               leftSection={<IconRefresh size={20} />}
               onClick={() => refetch()}
+              loading={isFetching && !isLoading}
             >
               Refresh
             </Button>
@@ -258,7 +360,9 @@ export function TaskList() {
                 { value: 'failed', label: 'Failed' },
               ]}
               value={filter.status || ''}
-              onChange={(value) => setFilter({ ...filter, status: value as Task['status'] || undefined })}
+              onChange={(value) =>
+                updateFilter({ status: value ? (value as Task['status']) : undefined })
+              }
               clearable
               w={150}
             />
@@ -275,7 +379,9 @@ export function TaskList() {
                 { value: 'others', label: 'Others' },
               ]}
               value={filter.type || ''}
-              onChange={(value) => setFilter({ ...filter, type: value as Task['type'] || undefined })}
+              onChange={(value) =>
+                updateFilter({ type: value ? (value as Task['type']) : undefined })
+              }
               clearable
               w={150}
             />
@@ -283,42 +389,91 @@ export function TaskList() {
             <Switch
               label="Assigned to me"
               checked={filter.assigned_to_me || false}
-              onChange={(event) => setFilter({ ...filter, assigned_to_me: event.currentTarget.checked })}
+              onChange={(event) =>
+                updateFilter({ assigned_to_me: event.currentTarget.checked ? true : undefined })
+              }
             />
 
             <Switch
               label="Has end-user dislike"
               checked={filter.has_dislike || false}
-              onChange={(event) => setFilter({ ...filter, has_dislike: event.currentTarget.checked })}
+              onChange={(event) =>
+                updateFilter({ has_dislike: event.currentTarget.checked ? true : undefined })
+              }
             />
           </Group>
         </Card>
 
         {/* Data Table */}
         <Card withBorder p={0}>
-          {isLoading ? (
+          {showInitialLoader ? (
             <Center p="xl">
               <Loader />
             </Center>
           ) : (
-            <DataTable
-              striped
-              highlightOnHover
-              records={tasks}
-              columns={columns}
-              selectedRecords={selectedRecords}
-              onSelectedRecordsChange={setSelectedRecords}
-              totalRecords={totalRecords}
-              recordsPerPage={PAGE_SIZE}
-              page={page}
-              onPageChange={setPage}
-              paginationText={({ from, to, totalRecords }) =>
-                `Showing ${from} to ${to} of ${totalRecords} tasks`
-              }
-              noRecordsText={tasks.length === 0 && !isLoading ? 'No tasks found' : ''}
-              noRecordsIcon={<div />}
-              minHeight={400}
-            />
+            <>
+              <ScrollArea style={{ minHeight: 400 }}>
+                <Table striped highlightOnHover withTableBorder withColumnBorders verticalSpacing="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      {visibleColumnDefinitions.map((column) => (
+                        <Table.Th key={column.key}>{column.label}</Table.Th>
+                      ))}
+                      <Table.Th style={{ textAlign: 'center' }}>Actions</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {tasks.length === 0 ? (
+                      <Table.Tr>
+                        <Table.Td colSpan={noDataColSpan}>
+                          <Center py="xl">
+                            <Text c="dimmed">No tasks found</Text>
+                          </Center>
+                        </Table.Td>
+                      </Table.Tr>
+                    ) : (
+                      tasks.map((task) => (
+                        <Table.Tr key={task.id}>
+                          {visibleColumnDefinitions.map((column) => (
+                            <Table.Td key={column.key}>{column.render(task)}</Table.Td>
+                          ))}
+                          <Table.Td>
+                            <Group gap="xs" justify="center">
+                              <Button
+                                size="xs"
+                                variant="subtle"
+                                onClick={() => {
+                                  setSelectedTask(task);
+                                  open();
+                                }}
+                                leftSection={<IconEye size={16} />}
+                              >
+                                View
+                              </Button>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      ))
+                    )}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+
+              <Group justify="space-between" align="center" px="md" py="sm">
+                <Text size="sm" c="dimmed">
+                  {`Showing ${fromRecord} to ${toRecord} of ${totalRecords} tasks`}
+                </Text>
+                <Group gap="sm" align="center">
+                  {isFetching && !isLoading && <Loader size="sm" />}
+                  <Pagination
+                    total={totalPages}
+                    value={page}
+                    onChange={setPage}
+                    disabled={isLoading || totalRecords === 0}
+                  />
+                </Group>
+              </Group>
+            </>
           )}
         </Card>
       </Stack>
@@ -332,6 +487,9 @@ export function TaskList() {
         size="xl"
         overlayProps={{ opacity: 0.5, blur: 4 }}
         scrollAreaComponent={ScrollArea.Autosize}
+        padding="md"
+        radius="md"
+        offset={8}
       >
         {selectedTask && (
           <Stack gap="md">

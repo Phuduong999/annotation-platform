@@ -7,10 +7,10 @@ export interface Task {
   request_id: string;
   user_id: string;
   team_id: string;
-  type: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
+  type: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others'; // this need to come from csv data, we need to 
   user_input: string;
   raw_ai_output: string;
-  ai_confidence: number;
+  ai_confidence: number; // need to remove
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   assigned_to: string | null;
   assigned_at: string | null;
@@ -19,6 +19,9 @@ export interface Task {
   result: TaskResult | null;
   created_at: string;
   updated_at: string;
+  user_email?: string | null;
+  logs?: string | null;
+  raw_json?: unknown;
   end_user_feedback?: EndUserFeedback | null;
 }
 
@@ -77,6 +80,20 @@ export interface TaskFilter {
   date_to?: string;
   has_dislike?: boolean;
   feedback_category?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TaskPagination {
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+export interface TaskListResponse {
+  tasks: Task[];
+  pagination: TaskPagination;
 }
 
 export interface ParsedAIOutput {
@@ -89,7 +106,7 @@ export interface ParsedAIOutput {
 }
 
 export interface TaskAnnotation {
-  classification: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others' | 'safe';
+  classification: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
   tags: string[];
   nutrition?: NutritionData;
 }
