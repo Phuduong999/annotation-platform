@@ -75,14 +75,16 @@ export function TaskDetail() {
   // Form setup
   const form = useForm<TaskAnnotation>({
     initialValues: {
-      classification: 'safe' as TaskAnnotation['classification'],
+      classification: 'others' as TaskAnnotation['classification'],
       tags: [],
       nutrition: parsedAI.nutrition,
+      scan_type_judgement: undefined,
+      result_return_judgement: undefined,
     },
     validate: {
       classification: (value) => {
         if (!value) return 'Classification is required';
-        const validValues = ['meal', 'label', 'front_label', 'screenshot', 'others', 'safe'];
+        const validValues = ['meal', 'label', 'front_label', 'screenshot', 'others'];
         if (!validValues.includes(value)) return 'Invalid classification';
         return null;
       },
@@ -92,17 +94,19 @@ export function TaskDetail() {
   // Update form when task loads
   useEffect(() => {
     if (task?.result) {
-      const classification = (task.result.classification || parsedAI.classification || 'safe') as TaskAnnotation['classification'];
+      const classification = (task.result.classification || parsedAI.classification || 'others') as TaskAnnotation['classification'];
       form.setValues({
         classification,
         tags: task.result.tags || [],
         nutrition: task.result.nutrition || parsedAI.nutrition,
+        scan_type_judgement: (task.result as any)?.scan_type_judgement,
+        result_return_judgement: (task.result as any)?.result_return_judgement,
       });
     } else if (parsedAI.classification) {
-      const validClassifications: TaskAnnotation['classification'][] = ['meal', 'label', 'front_label', 'screenshot', 'others', 'safe'];
+      const validClassifications: TaskAnnotation['classification'][] = ['meal', 'label', 'front_label', 'screenshot', 'others'];
       const classification = validClassifications.includes(parsedAI.classification as any) 
         ? parsedAI.classification as TaskAnnotation['classification']
-        : 'safe';
+        : 'others';
       form.setFieldValue('classification', classification);
     }
   }, [task, parsedAI]);
@@ -189,7 +193,23 @@ export function TaskDetail() {
 
   const handleSubmit = () => {
     const validation = form.validate();
-    if (validation.hasErrors) {
+    let hasErrors = validation.hasErrors;
+
+    if (!form.values.scan_type_judgement) {
+      form.setFieldError('scan_type_judgement', 'Required');
+      hasErrors = true;
+    } else {
+      form.setFieldError('scan_type_judgement', null);
+    }
+
+    if (!form.values.result_return_judgement) {
+      form.setFieldError('result_return_judgement', 'Required');
+      hasErrors = true;
+    } else {
+      form.setFieldError('result_return_judgement', null);
+    }
+
+    if (hasErrors) {
       notifications.show({
         title: 'Validation Error',
         message: 'Please fix the form errors before submitting',
@@ -248,6 +268,29 @@ export function TaskDetail() {
     navigate(`/tasks?category=${encodeURIComponent(category)}`);
   };
 
+  const annotationGuidelines = [
+    {
+      type: 'Meal',
+      description: 'Use for prepared food or dishes that require nutrition estimation.',
+    },
+    {
+      type: 'Label',
+      description: 'Use for nutrition labels or packaging text that needs transcription.',
+    },
+    {
+      type: 'Front Label',
+      description: 'Use for front-of-pack imagery highlighting marketing claims.',
+    },
+    {
+      type: 'Screenshot',
+      description: 'Use for app or web screenshots documenting digital flows.',
+    },
+    {
+      type: 'Others',
+      description: 'Use when the asset does not match any other category.',
+    },
+  ];
+
   // Hotkeys
   useHotkeys('ctrl+s, cmd+s', (e) => {
     e.preventDefault();
@@ -264,12 +307,11 @@ export function TaskDetail() {
     handleSkip();
   });
 
-  useHotkeys('1', () => form.setFieldValue('classification', 'safe'));
-  useHotkeys('2', () => form.setFieldValue('classification', 'meal'));
-  useHotkeys('3', () => form.setFieldValue('classification', 'label'));
-  useHotkeys('4', () => form.setFieldValue('classification', 'front_label'));
-  useHotkeys('5', () => form.setFieldValue('classification', 'screenshot'));
-  useHotkeys('6', () => form.setFieldValue('classification', 'others'));
+  useHotkeys('1', () => form.setFieldValue('classification', 'meal'));
+  useHotkeys('2', () => form.setFieldValue('classification', 'label'));
+  useHotkeys('3', () => form.setFieldValue('classification', 'front_label'));
+  useHotkeys('4', () => form.setFieldValue('classification', 'screenshot'));
+  useHotkeys('5', () => form.setFieldValue('classification', 'others'));
 
   if (isLoading) {
     return (
@@ -310,7 +352,7 @@ export function TaskDetail() {
             </Group>
             <Group>
               <Text size="xs" c="dimmed">
-                Hotkeys: 1-6 (classification) • ⌘+S (save) • ⌘+Enter (submit) • ⌘+Shift+S (skip)
+                Hotkeys: 1-5 (classification) • ⌘+S (save) • ⌘+Enter (submit) • ⌘+Shift+S (skip)
               </Text>
             </Group>
           </Group>
@@ -404,101 +446,152 @@ export function TaskDetail() {
             </Card>
           </Grid.Col>
 
-          {/* Right Panel - Annotation Form */}
+          {/* Right Panel - Annotation Form & Guide */}
           <Grid.Col span={4}>
-            <Card h="100%" withBorder p="md">
-              <Stack h="100%" justify="space-between">
-                <Stack>
-                  <Title order={4}>Annotation</Title>
+            <Stack h="100%" gap="md">
+              <Card h="100%" withBorder p="md" style={{ flex: 1, display: 'flex' }}>
+                <Stack h="100%" justify="space-between">
+                  <Stack>
+                    <Title order={4}>Annotation</Title>
+                    <Divider />
+
+                    <form>
+                      <Stack gap="md">
+                        {/* Classification */}
+                        <Select
+                          label="Classification"
+                          placeholder="Select classification"
+                          data={[
+                            { value: 'meal', label: 'Meal (1)' },
+                            { value: 'label', label: 'Label (2)' },
+                            { value: 'front_label', label: 'Front Label (3)' },
+                            { value: 'screenshot', label: 'Screenshot (4)' },
+                            { value: 'others', label: 'Others (5)' },
+                          ]}
+                          {...form.getInputProps('classification')}
+                          required
+                          error={form.errors.classification}
+                          allowDeselect={false}
+                        />
+
+                        {/* Scan Type Judgement */}
+                        <Select
+                          label="Scan Type Judgement"
+                          placeholder="Select judgement"
+                          data={[
+                            { value: 'correct_type', label: 'Correct Type' },
+                            { value: 'wrong_type', label: 'Wrong Type' },
+                          ]}
+                          {...form.getInputProps('scan_type_judgement')}
+                          required
+                          error={form.errors.scan_type_judgement}
+                          allowDeselect={false}
+                        />
+
+                        {/* Result Return Judgement */}
+                        <Select
+                          label="Result Return Judgement"
+                          placeholder="Select judgement"
+                          data={[
+                            { value: 'result_return', label: 'Result Returned' },
+                            { value: 'no_result_return', label: 'No Result Returned' },
+                          ]}
+                          {...form.getInputProps('result_return_judgement')}
+                          required
+                          error={form.errors.result_return_judgement}
+                          allowDeselect={false}
+                        />
+
+                        {/* Tags */}
+                        <TagsInput
+                          label="Tags"
+                          placeholder="Enter tags"
+                          {...form.getInputProps('tags')}
+                          clearable
+                        />
+
+                        {/* End-User Feedback - Read Only */}
+                        <EndUserFeedback
+                          feedback={task.end_user_feedback}
+                          onCategoryClick={handleCategoryClick}
+                        />
+
+                        {/* Task Metadata */}
+                        <Paper p="sm" withBorder>
+                          <Stack gap="xs">
+                            <Text size="xs" fw={500}>Task Info:</Text>
+                            <Text size="xs">Request ID: {task.request_id}</Text>
+                            <Text size="xs">Team: {task.team_id}</Text>
+                            <Text size="xs">Type: {task.type}</Text>
+                            <Text size="xs">Confidence: {(task.ai_confidence * 100).toFixed(1)}%</Text>
+                            <Text size="xs">Date: {new Date(task.scan_date).toLocaleString()}</Text>
+                          </Stack>
+                        </Paper>
+                      </Stack>
+                    </form>
+                  </Stack>
+
+                  {/* Action Buttons */}
+                  <Stack gap="sm">
+                    <Group grow>
+                      <Tooltip label="Save draft (⌘+S)">
+                        <Button
+                          variant="light"
+                          leftSection={<IconDeviceFloppy size={20} />}
+                          onClick={handleSave}
+                          loading={saveMutation.isPending}
+                        >
+                          Save
+                        </Button>
+                      </Tooltip>
+                      <Tooltip label="Submit and next (⌘+Enter)">
+                        <Button
+                          variant="filled"
+                          leftSection={<IconSend size={20} />}
+                          onClick={handleSubmit}
+                          loading={submitMutation.isPending}
+                          disabled={
+                            !form.values.classification ||
+                            !form.values.scan_type_judgement ||
+                            !form.values.result_return_judgement
+                          }
+                        >
+                          Submit
+                        </Button>
+                      </Tooltip>
+                    </Group>
+                    <Tooltip label="Skip task (⌘+Shift+S)">
+                      <Button
+                        variant="subtle"
+                        color="yellow"
+                        leftSection={<IconPlayerSkipForward size={20} />}
+                        onClick={handleSkip}
+                        loading={skipMutation.isPending}
+                      >
+                        Skip Task
+                      </Button>
+                    </Tooltip>
+                  </Stack>
+                </Stack>
+              </Card>
+
+              <Card withBorder p="md">
+                <Stack gap="sm">
+                  <Title order={5}>Annotation Guide</Title>
                   <Divider />
-                  
-                  <form>
-                    <Stack gap="md">
-                      {/* Classification */}
-                      <Select
-                        label="Classification"
-                        placeholder="Select classification"
-                        data={[
-                          { value: 'safe', label: 'Safe (1)' },
-                          { value: 'meal', label: 'Meal (2)' },
-                          { value: 'label', label: 'Label (3)' },
-                          { value: 'front_label', label: 'Front Label (4)' },
-                          { value: 'screenshot', label: 'Screenshot (5)' },
-                          { value: 'others', label: 'Others (6)' },
-                        ]}
-                        {...form.getInputProps('classification')}
-                        required
-                        error={form.errors.classification}
-                      />
-
-                      {/* Tags */}
-                      <TagsInput
-                        label="Tags"
-                        placeholder="Enter tags"
-                        {...form.getInputProps('tags')}
-                        clearable
-                      />
-
-                      {/* End-User Feedback - Read Only */}
-                      <EndUserFeedback 
-                        feedback={task.end_user_feedback} 
-                        onCategoryClick={handleCategoryClick}
-                      />
-
-                      {/* Task Metadata */}
-                      <Paper p="sm" withBorder>
-                        <Stack gap="xs">
-                          <Text size="xs" fw={500}>Task Info:</Text>
-                          <Text size="xs">Request ID: {task.request_id}</Text>
-                          <Text size="xs">Team: {task.team_id}</Text>
-                          <Text size="xs">Type: {task.type}</Text>
-                          <Text size="xs">Confidence: {(task.ai_confidence * 100).toFixed(1)}%</Text>
-                          <Text size="xs">Date: {new Date(task.scan_date).toLocaleString()}</Text>
+                  <Stack gap="sm">
+                    {annotationGuidelines.map((item) => (
+                      <Paper key={item.type} p="sm" withBorder radius="md">
+                        <Stack gap={4}>
+                          <Text fw={600} size="sm">{item.type}</Text>
+                          <Text size="xs" c="dimmed">{item.description}</Text>
                         </Stack>
                       </Paper>
-                    </Stack>
-                  </form>
+                    ))}
+                  </Stack>
                 </Stack>
-
-                {/* Action Buttons */}
-                <Stack gap="sm">
-                  <Group grow>
-                    <Tooltip label="Save draft (⌘+S)">
-                      <Button
-                        variant="light"
-                        leftSection={<IconDeviceFloppy size={20} />}
-                        onClick={handleSave}
-                        loading={saveMutation.isPending}
-                      >
-                        Save
-                      </Button>
-                    </Tooltip>
-                    <Tooltip label="Submit and next (⌘+Enter)">
-                      <Button
-                        variant="filled"
-                        leftSection={<IconSend size={20} />}
-                        onClick={handleSubmit}
-                        loading={submitMutation.isPending}
-                        disabled={!form.values.classification}
-                      >
-                        Submit
-                      </Button>
-                    </Tooltip>
-                  </Group>
-                  <Tooltip label="Skip task (⌘+Shift+S)">
-                    <Button
-                      variant="subtle"
-                      color="yellow"
-                      leftSection={<IconPlayerSkipForward size={20} />}
-                      onClick={handleSkip}
-                      loading={skipMutation.isPending}
-                    >
-                      Skip Task
-                    </Button>
-                  </Tooltip>
-                </Stack>
-              </Stack>
-            </Card>
+              </Card>
+            </Stack>
           </Grid.Col>
         </Grid>
       </Stack>

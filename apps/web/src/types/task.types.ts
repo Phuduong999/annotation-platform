@@ -109,6 +109,8 @@ export interface TaskAnnotation {
   classification: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
   tags: string[];
   nutrition?: NutritionData;
+  scan_type_judgement?: 'correct_type' | 'wrong_type';
+  result_return_judgement?: 'result_return' | 'no_result_return';
 }
 
 export interface EndUserFeedback {
