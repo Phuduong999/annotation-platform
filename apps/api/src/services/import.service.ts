@@ -7,7 +7,6 @@ import {
   validateHeaders,
   ValidationError,
   ValidationErrorCode,
-  ScanTypeEnum,
   type CsvRow,
 } from '@monorepo/shared';
 
@@ -27,7 +26,6 @@ export interface ImportRowRecord {
   errorCode?: string;
   errorDetail?: string;
   rowData: Record<string, string>;
-  taskId?: string;
 }
 
 /**
@@ -35,22 +33,30 @@ export interface ImportRowRecord {
  * 
  * Processes CSV/XLSX file uploads for the /import/jobs endpoint.
  * 
+ * STRATEGY: Option 1 - ImportService only creates import_rows
+ * - Task creation is handled separately by TaskService via /tasks/create
+ * - This prevents duplicate task creation and allows link validation before task creation
+ * 
  * Key Features:
  * - Converts XLSX/XLS files to CSV format
  * - Validates CSV data using shared schema from @monorepo/shared
  * - Enforces ScanTypeEnum values: ['meal','label','front_label','screenshot','others']
  * - Creates import_rows records for all rows (valid/invalid)
- * - Creates task stubs for valid rows with status='pending'
+ * - NO task creation (handled separately by TaskService)
  * - Generates error reports for invalid rows
  * 
  * CSV Schema:
- * - date: ISO-8601 date string (mapped to scan_date)
+ * - date: ISO-8601 date string
  * - request_id: unique identifier
  * - user_id: user identifier  
  * - team_id: team identifier
- * - type: scan type enum (mapped to scan_type)
+ * - type: scan type enum
  * - user_input: image URL
- * - raw_ai_output: JSON string (parsed and stored as JSON)
+ * - raw_ai_output: JSON string
+ * 
+ * Workflow:
+ * 1. POST /import/jobs - validates and creates import_rows
+ * 2. POST /tasks/create - creates tasks only for valid rows with link_status='ok'
  */
 export class ImportService {
   constructor(private pool: Pool) {}
@@ -298,6 +304,7 @@ export class ImportService {
 
   /**
    * Process and validate a single row
+   * Only creates import_rows - tasks are created later via /tasks/create
    */
   private async processRow(
     record: Record<string, string>,
@@ -320,15 +327,11 @@ export class ImportService {
     }
 
     if (validRow) {
-      // Create task stub
-      const taskId = await this.createTaskStub(validRow);
-
-      // Store valid row
+      // Store valid row (no task creation here - handled by TaskService later)
       await this.storeImportRow(jobId, {
         lineNumber,
         status: 'valid',
         rowData: record,
-        taskId,
       });
       return true;
     }
@@ -338,12 +341,13 @@ export class ImportService {
 
   /**
    * Store import row record
+   * Only stores row data - no task references (tasks created separately)
    */
   private async storeImportRow(jobId: string, row: ImportRowRecord): Promise<void> {
     await this.pool.query(
       `INSERT INTO import_rows 
-       (import_job_id, line_number, status, error_code, error_detail, row_data, task_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       (import_job_id, line_number, status, error_code, error_detail, row_data)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         jobId,
         row.lineNumber,
@@ -351,47 +355,10 @@ export class ImportService {
         row.errorCode || null,
         row.errorDetail || null,
         JSON.stringify(row.rowData),
-        row.taskId || null,
       ]
     );
   }
 
-  /**
-   * Create task stub for valid row
-   * Maps CSV 'type' field directly to database 'scan_type' field
-   * Enforces only allowed values: ['meal','label','front_label','screenshot','others']
-   */
-  private async createTaskStub(row: CsvRow): Promise<string> {
-    // Explicit validation that the type is in our allowed enum values
-    // This is redundant with shared validation but adds extra safety
-    if (!ScanTypeEnum.safeParse(row.type).success) {
-      throw new Error(`Invalid scan type: ${row.type}. Must be one of: ${ScanTypeEnum.options.join(', ')}`);
-    }
-
-    let parsedAiOutput;
-    try {
-      parsedAiOutput = JSON.parse(row.raw_ai_output);
-    } catch (error) {
-      throw new Error(`Invalid JSON in raw_ai_output: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-
-    const result = await this.pool.query(
-      `INSERT INTO tasks 
-       (request_id, user_id, team_id, scan_type, user_input, raw_ai_output, scan_date, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
-       RETURNING id`,
-      [
-        row.request_id,
-        row.user_id,
-        row.team_id,
-        row.type, // Maps CSV 'type' to database 'scan_type'
-        row.user_input,
-        parsedAiOutput,
-        new Date(row.date),
-      ]
-    );
-    return result.rows[0].id;
-  }
 
   /**
    * Generate error report CSV

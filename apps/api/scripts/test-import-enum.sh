@@ -6,9 +6,10 @@
 API_URL="http://localhost:4000"
 TEST_CSV="./test-data-new-enum.csv"
 
-echo "🧪 Testing Import API with New ScanTypeEnum"
-echo "==========================================="
+echo "🧪 Testing Import API with New ScanTypeEnum (Option 1 Strategy)"
+echo "================================================================="
 echo "Testing that type field only accepts: ['meal','label','front_label','screenshot','others']"
+echo "NOTE: Import only creates import_rows - tasks created separately via /tasks/create"
 echo ""
 
 # Test with valid and invalid enum values
@@ -77,6 +78,35 @@ if [ ! -z "$JOB_ID" ] && [ "$INVALID_ROWS" -gt "0" ]; then
   fi
 fi
 
+# Test the task creation workflow
+if [ "$SUCCESS" = "true" ] && [ ! -z "$JOB_ID" ] && [ "$VALID_ROWS" -gt "0" ]; then
+  echo ""
+  echo "3️⃣ Testing task creation workflow (Option 1 Strategy)..."
+  echo "Creating tasks from import job (only for valid rows with good assets)..."
+  
+  TASK_RESPONSE=$(curl -s -X POST "$API_URL/tasks/create" \
+    -H "Content-Type: application/json" \
+    -d "{\"jobId\": \"$JOB_ID\"}")
+  
+  echo "📋 Task Creation Response:"
+  echo "$TASK_RESPONSE" | jq '.' 2>/dev/null || echo "$TASK_RESPONSE"
+  echo ""
+  
+  TASKS_CREATED=$(echo "$TASK_RESPONSE" | grep -o '"tasksCreated":[0-9]*' | cut -d':' -f2)
+  TASKS_SKIPPED=$(echo "$TASK_RESPONSE" | grep -o '"tasksSkipped":[0-9]*' | cut -d':' -f2)
+  
+  echo "📊 Task Creation Results:"
+  echo "   Tasks Created: $TASKS_CREATED"
+  echo "   Tasks Skipped: $TASKS_SKIPPED"
+  
+  if [ "$TASKS_CREATED" = "0" ]; then
+    echo "⚠️  WARNING: No tasks created (expected since no asset validation in this test)"
+    echo "   Tasks would be created only for rows with link_status='ok'"
+  else
+    echo "✅ PASS: Tasks created successfully from valid import rows"
+  fi
+fi
+
 echo ""
-echo "🏁 Import enum validation test completed!"
-echo "========================================="
+echo "🏁 Import enum validation and task creation test completed!"
+echo "============================================================"

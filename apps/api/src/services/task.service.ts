@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { ScanTypeEnum } from '@monorepo/shared';
 
 export interface TaskCreationResult {
   totalRows: number;
@@ -31,11 +32,31 @@ export interface Task {
 
 export type AssignmentMethod = 'equal_split' | 'pull_queue';
 
+/**
+ * Task Service
+ * 
+ * STRATEGY: Option 1 - Unified task creation
+ * - ImportService only creates import_rows (no tasks)
+ * - TaskService handles ALL task creation via createTasksFromImportJob()
+ * - Tasks are only created for valid rows with link_status='ok'
+ * - Prevents duplicate tasks and ensures proper link validation
+ * 
+ * Key Features:
+ * - Creates tasks only from valid import_rows with good assets (link_status='ok')
+ * - Idempotent task creation (checks for existing tasks)
+ * - Links tasks to import_rows via import_row_id
+ * - Supports task assignment strategies (equal_split, pull_queue)
+ */
 export class TaskService {
   constructor(private pool: Pool) {}
 
   /**
    * Create tasks from valid import rows with link_status=ok
+   * 
+   * STRATEGY: Option 1 implementation
+   * - Only creates tasks for valid import_rows where assets have link_status='ok'
+   * - Prevents duplicate tasks (idempotent)
+   * - Validates ScanTypeEnum values during task creation
    */
   async createTasksFromImportJob(jobId: string): Promise<TaskCreationResult> {
     const result: TaskCreationResult = {
@@ -45,7 +66,7 @@ export class TaskService {
       skipReasons: {},
     };
 
-    // Get all valid import rows
+    // Get all valid import rows with asset status
     const validRowsResult = await this.pool.query(
       `SELECT ir.*, a.link_status, a.url
        FROM import_rows ir
@@ -61,58 +82,77 @@ export class TaskService {
       const rowData = row.row_data;
       const requestId = rowData.request_id;
 
-      // Skip if link status is not 'ok'
-      if (row.link_status !== 'ok') {
-        result.tasksSkipped++;
-        const reason = row.link_status || 'no_link_check';
-        result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1;
-        continue;
-      }
-
-      // Check if task already exists
-      const existingTask = await this.pool.query(
-        'SELECT id FROM tasks WHERE request_id = $1',
-        [requestId]
-      );
-
-      if (existingTask.rows.length > 0) {
-        result.tasksSkipped++;
-        result.skipReasons['already_exists'] = (result.skipReasons['already_exists'] || 0) + 1;
-        continue;
-      }
-
-      // Extract AI confidence if available
-      let aiConfidence: number | null = null;
       try {
-        const aiOutput = JSON.parse(rowData.raw_ai_output);
-        if (aiOutput.confidence !== undefined) {
-          aiConfidence = parseFloat(aiOutput.confidence);
-        } else if (aiOutput.score !== undefined) {
-          aiConfidence = parseFloat(aiOutput.score);
+        // Skip if link status is not 'ok' (prevents broken image tasks)
+        if (row.link_status !== 'ok') {
+          result.tasksSkipped++;
+          const reason = row.link_status || 'no_link_check';
+          result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1;
+          continue;
         }
-      } catch (e) {
-        // Ignore JSON parse errors
+
+        // Check if task already exists (idempotent)
+        const existingTask = await this.pool.query(
+          'SELECT id FROM tasks WHERE request_id = $1',
+          [requestId]
+        );
+
+        if (existingTask.rows.length > 0) {
+          result.tasksSkipped++;
+          result.skipReasons['already_exists'] = (result.skipReasons['already_exists'] || 0) + 1;
+          continue;
+        }
+
+        // Validate scan type (extra safety check)
+        if (!ScanTypeEnum.safeParse(rowData.type).success) {
+          result.tasksSkipped++;
+          result.skipReasons['invalid_scan_type'] = (result.skipReasons['invalid_scan_type'] || 0) + 1;
+          continue;
+        }
+
+        // Parse and validate raw_ai_output
+        let parsedAiOutput;
+        let aiConfidence: number | null = null;
+        
+        try {
+          parsedAiOutput = JSON.parse(rowData.raw_ai_output);
+          // Extract AI confidence if available
+          if (parsedAiOutput.confidence !== undefined) {
+            aiConfidence = parseFloat(parsedAiOutput.confidence);
+          } else if (parsedAiOutput.score !== undefined) {
+            aiConfidence = parseFloat(parsedAiOutput.score);
+          }
+        } catch (e) {
+          result.tasksSkipped++;
+          result.skipReasons['invalid_json'] = (result.skipReasons['invalid_json'] || 0) + 1;
+          continue;
+        }
+
+        // Create task with proper field mapping
+        await this.pool.query(
+          `INSERT INTO tasks 
+           (import_row_id, request_id, user_id, team_id, scan_type, user_input, raw_ai_output, ai_confidence, scan_date, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')`,
+          [
+            row.id,                    // Link to import_row
+            requestId,                 // request_id
+            rowData.user_id,          // user_id 
+            rowData.team_id,          // team_id
+            rowData.type,             // CSV 'type' → DB 'scan_type'
+            rowData.user_input,       // user_input (image URL)
+            parsedAiOutput,           // parsed JSON
+            aiConfidence,             // extracted confidence score
+            new Date(rowData.date),   // CSV 'date' → DB 'scan_date'
+          ]
+        );
+
+        result.tasksCreated++;
+      } catch (error) {
+        // Handle individual row errors without failing the entire batch
+        result.tasksSkipped++;
+        result.skipReasons['creation_error'] = (result.skipReasons['creation_error'] || 0) + 1;
+        console.error(`Error creating task for request_id ${requestId}:`, error);
       }
-
-      // Create task
-      await this.pool.query(
-        `INSERT INTO tasks 
-         (import_row_id, request_id, user_id, team_id, scan_type, user_input, raw_ai_output, ai_confidence, scan_date, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')`,
-        [
-          row.id,
-          requestId,
-          rowData.user_id,
-          rowData.team_id,
-          rowData.type,
-          rowData.user_input,
-          JSON.parse(rowData.raw_ai_output),
-          aiConfidence,
-          new Date(rowData.date),
-        ]
-      );
-
-      result.tasksCreated++;
     }
 
     return result;
