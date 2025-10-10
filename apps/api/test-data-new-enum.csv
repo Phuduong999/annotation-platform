@@ -1,0 +1,7 @@
+date,request_id,user_id,team_id,type,user_input,raw_ai_output
+2024-01-01T12:00:00Z,req-001,user-001,team-001,meal,https://example.com/food1.jpg,"{\"result\":\"safe\",\"confidence\":0.95}"
+2024-01-01T12:15:00Z,req-002,user-002,team-001,label,https://example.com/label1.jpg,"{\"result\":\"approved\",\"score\":0.88}"
+2024-01-01T12:30:00Z,req-003,user-003,team-002,front_label,https://example.com/frontlabel1.jpg,"{\"status\":\"valid\",\"details\":{}}"
+2024-01-01T12:45:00Z,req-004,user-004,team-002,screenshot,https://example.com/screen1.jpg,"{\"analysis\":\"complete\",\"flags\":[]}"
+2024-01-01T13:00:00Z,req-005,user-005,team-003,others,https://example.com/other1.jpg,"{\"category\":\"misc\",\"processed\":true}"
+2024-01-01T13:15:00Z,req-006,user-006,team-003,invalid_type,https://example.com/invalid.jpg,"{\"error\":\"should_fail\"}"

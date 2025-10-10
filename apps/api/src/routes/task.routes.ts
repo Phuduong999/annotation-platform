@@ -5,6 +5,101 @@ import { TaskService } from '../services/task.service.js';
 export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
   const taskService = new TaskService(pool);
 
+  // GET /tasks - List all tasks with filtering
+  fastify.get(
+    '/tasks',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'rejected'] },
+            user_id: { type: 'string' },
+            limit: { type: 'number', default: 100 },
+            offset: { type: 'number', default: 0 },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Querystring: {
+          status?: string;
+          user_id?: string;
+          limit?: number;
+          offset?: number;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { status, user_id, limit = 100, offset = 0 } = request.query;
+
+        let query = 'SELECT * FROM tasks WHERE 1=1';
+        const params: any[] = [];
+        let paramIndex = 1;
+
+        if (status) {
+          query += ` AND status = $${paramIndex}`;
+          params.push(status);
+          paramIndex++;
+        }
+
+        if (user_id) {
+          query += ` AND assigned_to = $${paramIndex}`;
+          params.push(user_id);
+          paramIndex++;
+        }
+
+        query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        params.push(limit, offset);
+
+        const result = await pool.query(query, params);
+
+        // Get total count for pagination
+        let countQuery = 'SELECT COUNT(*) FROM tasks WHERE 1=1';
+        const countParams: any[] = [];
+        let countParamIndex = 1;
+
+        if (status) {
+          countQuery += ` AND status = $${countParamIndex}`;
+          countParams.push(status);
+          countParamIndex++;
+        }
+
+        if (user_id) {
+          countQuery += ` AND assigned_to = $${countParamIndex}`;
+          countParams.push(user_id);
+          countParamIndex++;
+        }
+
+        const countResult = await pool.query(countQuery, countParams);
+        const total = parseInt(countResult.rows[0].count);
+
+        return reply.code(200).send({
+          success: true,
+          data: {
+            tasks: result.rows,
+            pagination: {
+              total,
+              limit,
+              offset,
+              hasMore: offset + result.rows.length < total,
+            },
+          },
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
   // GET /tasks/:id - Get single task with feedback
   fastify.get(
     '/tasks/:id',

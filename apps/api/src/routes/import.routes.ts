@@ -47,23 +47,31 @@ export async function importRoutes(fastify: FastifyInstance, pool: Pool) {
         }
 
         // Check file type
-        if (
-          !data.mimetype.includes('csv') &&
-          !data.mimetype.includes('text') &&
-          !data.filename.endsWith('.csv')
-        ) {
+        const isXLSX = 
+          data.filename.endsWith('.xlsx') || 
+          data.filename.endsWith('.xls') ||
+          data.mimetype.includes('spreadsheet') ||
+          data.mimetype.includes('excel');
+
+        const isCSV = 
+          data.filename.endsWith('.csv') ||
+          data.mimetype.includes('csv') ||
+          data.mimetype.includes('text');
+
+        if (!isCSV && !isXLSX) {
           return reply.code(400).send({
             success: false,
-            error: 'Invalid file type. Please upload a CSV file',
+            error: 'Invalid file type. Please upload a CSV or XLSX file',
             timestamp: new Date().toISOString(),
           });
         }
 
-        // Process CSV import
+        // Process CSV/XLSX import
         const result = await importService.processCSVImport(
           data.file,
           data.filename,
-          request.headers['x-user-id'] as string | undefined
+          request.headers['x-user-id'] as string | undefined,
+          isXLSX
         );
 
         return reply.code(200).send({

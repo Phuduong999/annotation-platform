@@ -1,11 +1,13 @@
 import { Pool } from 'pg';
 import { parse } from 'csv-parse';
 import { Readable } from 'stream';
+import * as XLSX from 'xlsx';
 import {
   validateRow,
   validateHeaders,
   ValidationError,
   ValidationErrorCode,
+  ScanTypeEnum,
   type CsvRow,
 } from '@monorepo/shared';
 
@@ -28,22 +30,87 @@ export interface ImportRowRecord {
   taskId?: string;
 }
 
+/**
+ * Import Service
+ * 
+ * Processes CSV/XLSX file uploads for the /import/jobs endpoint.
+ * 
+ * Key Features:
+ * - Converts XLSX/XLS files to CSV format
+ * - Validates CSV data using shared schema from @monorepo/shared
+ * - Enforces ScanTypeEnum values: ['meal','label','front_label','screenshot','others']
+ * - Creates import_rows records for all rows (valid/invalid)
+ * - Creates task stubs for valid rows with status='pending'
+ * - Generates error reports for invalid rows
+ * 
+ * CSV Schema:
+ * - date: ISO-8601 date string (mapped to scan_date)
+ * - request_id: unique identifier
+ * - user_id: user identifier  
+ * - team_id: team identifier
+ * - type: scan type enum (mapped to scan_type)
+ * - user_input: image URL
+ * - raw_ai_output: JSON string (parsed and stored as JSON)
+ */
 export class ImportService {
   constructor(private pool: Pool) {}
 
   /**
-   * Process CSV file stream and create import job
+   * Convert XLSX stream to CSV stream
+   */
+  private async convertXLSXtoCSVStream(fileStream: Readable): Promise<Readable> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      
+      fileStream.on('data', (chunk) => chunks.push(chunk));
+      fileStream.on('error', reject);
+      fileStream.on('end', () => {
+        try {
+          // Parse XLSX
+          const buffer = Buffer.concat(chunks);
+          const workbook = XLSX.read(buffer, { type: 'buffer' });
+          
+          // Get first sheet
+          const sheetName = workbook.SheetNames[0];
+          if (!sheetName) {
+            throw new Error('XLSX file has no sheets');
+          }
+          
+          const worksheet = workbook.Sheets[sheetName];
+          
+          // Convert to CSV
+          const csv = XLSX.utils.sheet_to_csv(worksheet);
+          
+          // Create readable stream from CSV string
+          const csvStream = Readable.from([csv]);
+          resolve(csvStream);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  /**
+   * Process CSV/XLSX file stream and create import job
    */
   async processCSVImport(
     fileStream: Readable,
     filename: string,
-    uploadedBy?: string
+    uploadedBy?: string,
+    isXLSX: boolean = false
   ): Promise<ImportJobResult> {
     // Create import job
     const jobId = await this.createImportJob(filename, uploadedBy);
 
     try {
-      const result = await this.streamCSVValidation(fileStream, jobId);
+      // Convert XLSX to CSV if needed
+      let processStream = fileStream;
+      if (isXLSX) {
+        processStream = await this.convertXLSXtoCSVStream(fileStream);
+      }
+
+      const result = await this.streamCSVValidation(processStream, jobId);
 
       // Generate error report if there are errors
       let errorReportPath: string | null = null;
@@ -291,8 +358,23 @@ export class ImportService {
 
   /**
    * Create task stub for valid row
+   * Maps CSV 'type' field directly to database 'scan_type' field
+   * Enforces only allowed values: ['meal','label','front_label','screenshot','others']
    */
   private async createTaskStub(row: CsvRow): Promise<string> {
+    // Explicit validation that the type is in our allowed enum values
+    // This is redundant with shared validation but adds extra safety
+    if (!ScanTypeEnum.safeParse(row.type).success) {
+      throw new Error(`Invalid scan type: ${row.type}. Must be one of: ${ScanTypeEnum.options.join(', ')}`);
+    }
+
+    let parsedAiOutput;
+    try {
+      parsedAiOutput = JSON.parse(row.raw_ai_output);
+    } catch (error) {
+      throw new Error(`Invalid JSON in raw_ai_output: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+
     const result = await this.pool.query(
       `INSERT INTO tasks 
        (request_id, user_id, team_id, scan_type, user_input, raw_ai_output, scan_date, status)
@@ -302,9 +384,9 @@ export class ImportService {
         row.request_id,
         row.user_id,
         row.team_id,
-        row.type,
+        row.type, // Maps CSV 'type' to database 'scan_type'
         row.user_input,
-        JSON.parse(row.raw_ai_output),
+        parsedAiOutput,
         new Date(row.date),
       ]
     );
