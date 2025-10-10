@@ -6,7 +6,6 @@ import {
   ValidationErrorCode,
   ValidationResult,
   type CsvRow,
-  type CsvHeader,
 } from './csv-validation.js';
 import { ScanTypeEnum } from './ontology.js';
 
@@ -15,11 +14,19 @@ import { ScanTypeEnum } from './ontology.js';
  */
 
 /**
+ * Normalizes a header string by converting spaces to underscores and trimming/lowercasing
+ */
+export function normalizeHeader(header: string): string {
+  return header.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+/**
  * Validates CSV headers against required headers
+ * Note: Extra headers are allowed and will be ignored during processing
  */
 export function validateHeaders(headers: string[]): ValidationError[] {
   const errors: ValidationError[] = [];
-  const normalizedHeaders = headers.map((h) => h.trim().toLowerCase());
+  const normalizedHeaders = headers.map(normalizeHeader);
   
   // Check for missing required headers
   for (const required of REQUIRED_CSV_HEADERS) {
@@ -34,18 +41,7 @@ export function validateHeaders(headers: string[]): ValidationError[] {
     }
   }
   
-  // Check for extra/invalid headers
-  for (const header of normalizedHeaders) {
-    if (!REQUIRED_CSV_HEADERS.includes(header as CsvHeader)) {
-      errors.push({
-        code: ValidationErrorCode.INVALID_HEADER,
-        line: 1,
-        field: header,
-        message: `Invalid header: ${header}`,
-        expected: REQUIRED_CSV_HEADERS.join(', '),
-      });
-    }
-  }
+  // Note: We no longer error on extra headers - they are allowed but will be ignored
   
   return errors;
 }
@@ -157,7 +153,7 @@ export function parseAndValidateCsv(csvContent: string): ValidationResult {
   
   // Parse headers
   const headerLine = lines[0].trim();
-  const headers = headerLine.split(',').map((h) => h.trim().toLowerCase());
+  const headers = headerLine.split(',').map(normalizeHeader);
   
   // Validate headers
   const headerErrors = validateHeaders(headers);

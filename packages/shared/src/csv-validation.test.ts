@@ -35,7 +35,7 @@ describe('CSV Validation', () => {
       expect(errors.some((e) => e.message.includes('type'))).toBe(true);
     });
 
-    it('should detect invalid/extra headers', () => {
+    it('should allow extra headers (they will be ignored)', () => {
       const headers = [
         'date',
         'request_id',
@@ -44,13 +44,12 @@ describe('CSV Validation', () => {
         'type',
         'user_input',
         'raw_ai_output',
-        'invalid_column',
+        'extra_column',
       ];
       const errors = validateHeaders(headers);
       
-      expect(errors).toHaveLength(1);
-      expect(errors[0].code).toBe(ValidationErrorCode.INVALID_HEADER);
-      expect(errors[0].message).toContain('invalid_column');
+      // Extra headers are now allowed and ignored
+      expect(errors).toHaveLength(0);
     });
 
     it('should handle case insensitive headers', () => {
@@ -74,7 +73,7 @@ describe('CSV Validation', () => {
       request_id: 'req-123',
       user_id: 'user-456',
       team_id: 'team-789',
-      type: 'content_moderation',
+      type: 'meal',
       user_input: 'https://example.com/image.jpg',
       raw_ai_output: '{"result":"safe"}',
     };
@@ -109,8 +108,27 @@ describe('CSV Validation', () => {
       expect(errors[0].code).toBe(ValidationErrorCode.INVALID_ENUM_VALUE);
       expect(errors[0].line).toBe(3);
       expect(errors[0].field).toBe('type');
-      expect(errors[0].expected).toContain('content_moderation');
+      expect(errors[0].expected).toContain('meal');
       expect(errors[0].value).toBe('invalid_type');
+    });
+
+    it('should reject Type=meals as INVALID_ENUM', () => {
+      const invalidRow = { ...validRow, type: 'meals' };
+      const { errors } = validateRow(invalidRow, 3, new Set());
+      
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].code).toBe(ValidationErrorCode.INVALID_ENUM_VALUE);
+      expect(errors[0].line).toBe(3);
+      expect(errors[0].field).toBe('type');
+      expect(errors[0].expected).toContain('meal');
+      expect(errors[0].value).toBe('meals');
+    });
+
+    it('should accept Type=meal as valid', () => {
+      const validMealRow = { ...validRow, type: 'meal' };
+      const { errors } = validateRow(validMealRow, 3, new Set());
+      
+      expect(errors).toHaveLength(0);
     });
 
     it('should detect invalid JSON', () => {
@@ -193,8 +211,8 @@ describe('CSV Validation', () => {
 
   describe('parseAndValidateCsv', () => {
     const validCsv = `date,request_id,user_id,team_id,type,user_input,raw_ai_output
-2024-01-01T12:00:00Z,req-1,user-1,team-1,content_moderation,https://example.com/img.jpg,{"result":"safe"}
-2024-01-02T13:00:00Z,req-2,user-2,team-2,safety_check,https://example.com/photo.png,{"status":"ok"}`;
+2024-01-01T12:00:00Z,req-1,user-1,team-1,meal,https://example.com/img.jpg,{"result":"safe"}
+2024-01-02T13:00:00Z,req-2,user-2,team-2,label,https://example.com/photo.png,{"status":"ok"}`;
 
     it('should parse and validate valid CSV', () => {
       const result = parseAndValidateCsv(validCsv);
@@ -232,9 +250,9 @@ describe('CSV Validation', () => {
 
     it('should report errors with correct line numbers', () => {
       const csvWithErrors = `date,request_id,user_id,team_id,type,user_input,raw_ai_output
-2024-01-01,req-1,user-1,team-1,content_moderation,https://example.com/img.jpg,{"result":"safe"}
+2024-01-01,req-1,user-1,team-1,meal,https://example.com/img.jpg,{"result":"safe"}
 2024-01-02T13:00:00Z,req-2,user-2,team-2,invalid_type,https://example.com/photo.png,{"status":"ok"}
-2024-01-03T14:00:00Z,req-3,user-3,team-3,safety_check,not-a-url,invalid json`;
+2024-01-03T14:00:00Z,req-3,user-3,team-3,screenshot,not-a-url,invalid json`;
       
       const result = parseAndValidateCsv(csvWithErrors);
       
@@ -260,8 +278,8 @@ describe('CSV Validation', () => {
 
     it('should detect duplicate request_ids across rows', () => {
       const csvWithDuplicates = `date,request_id,user_id,team_id,type,user_input,raw_ai_output
-2024-01-01T12:00:00Z,req-1,user-1,team-1,content_moderation,https://example.com/img.jpg,{"result":"safe"}
-2024-01-02T13:00:00Z,req-1,user-2,team-2,safety_check,https://example.com/photo.png,{"status":"ok"}`
+2024-01-01T12:00:00Z,req-1,user-1,team-1,meal,https://example.com/img.jpg,{"result":"safe"}
+2024-01-02T13:00:00Z,req-1,user-2,team-2,label,https://example.com/photo.png,{"status":"ok"}`
       
       const result = parseAndValidateCsv(csvWithDuplicates);
       
@@ -274,9 +292,9 @@ describe('CSV Validation', () => {
 
     it('should skip empty lines', () => {
       const csvWithEmptyLines = `date,request_id,user_id,team_id,type,user_input,raw_ai_output
-2024-01-01T12:00:00Z,req-1,user-1,team-1,content_moderation,https://example.com/img.jpg,{"result":"safe"}
+2024-01-01T12:00:00Z,req-1,user-1,team-1,meal,https://example.com/img.jpg,{"result":"safe"}
 
-2024-01-02T13:00:00Z,req-2,user-2,team-2,safety_check,https://example.com/photo.png,{"status":"ok"}`
+2024-01-02T13:00:00Z,req-2,user-2,team-2,label,https://example.com/photo.png,{"status":"ok"}`
       
       const result = parseAndValidateCsv(csvWithEmptyLines);
       
@@ -293,7 +311,7 @@ describe('CSV Validation', () => {
           request_id: 'req-1',
           user_id: 'user-1',
           team_id: 'team-1',
-          type: 'content_moderation',
+          type: 'meal',
           user_input: 'https://example.com/img.jpg',
           raw_ai_output: '{"result":"safe"}',
         },
@@ -302,7 +320,7 @@ describe('CSV Validation', () => {
           request_id: 'req-2',
           user_id: 'user-2',
           team_id: 'team-2',
-          type: 'safety_check',
+          type: 'label',
           user_input: 'https://example.com/photo.png',
           raw_ai_output: '{"status":"ok"}',
         },
@@ -322,7 +340,7 @@ describe('CSV Validation', () => {
           request_id: 'req-1',
           user_id: 'user-1',
           team_id: 'team-1',
-          type: 'content_moderation',
+          type: 'meal',
           user_input: 'https://example.com/img.jpg',
           raw_ai_output: '{"result":"safe"}',
         },
@@ -344,7 +362,7 @@ describe('CSV Validation', () => {
           field: 'type',
           value: 'bad_type',
           message: 'Invalid enum value',
-          expected: 'content_moderation, safety_check',
+          expected: 'meal, label, front_label, screenshot, others',
         },
       ];
       
@@ -354,7 +372,7 @@ describe('CSV Validation', () => {
       expect(formatted).toContain('INVALID_ENUM_VALUE');
       expect(formatted).toContain('type');
       expect(formatted).toContain('bad_type');
-      expect(formatted).toContain('content_moderation');
+      expect(formatted).toContain('meal');
     });
 
     it('should format multiple errors', () => {
@@ -399,7 +417,7 @@ describe('CSV Validation', () => {
           request_id: 'req-1',
           user_id: 'user-1',
           team_id: 'team-1',
-          type: 'content_moderation',
+          type: 'meal',
           user_input: 'https://example.com/img.jpg',
           raw_ai_output: '{"result":"safe"}',
         };
@@ -423,7 +441,7 @@ describe('CSV Validation', () => {
           request_id: 'req-1',
           user_id: 'user-1',
           team_id: 'team-1',
-          type: 'content_moderation',
+          type: 'meal',
           user_input: 'https://example.com/img.jpg',
           raw_ai_output: '{"result":"safe"}',
         };
@@ -449,7 +467,7 @@ describe('CSV Validation', () => {
           request_id: 'req-1',
           user_id: 'user-1',
           team_id: 'team-1',
-          type: 'content_moderation',
+          type: 'meal',
           user_input: url,
           raw_ai_output: '{"result":"safe"}',
         };
@@ -468,7 +486,7 @@ describe('CSV Validation', () => {
           request_id: 'req-1',
           user_id: 'user-1',
           team_id: 'team-1',
-          type: 'content_moderation',
+          type: 'meal',
           user_input: url,
           raw_ai_output: '{"result":"safe"}',
         };
@@ -491,7 +509,7 @@ describe('CSV Validation', () => {
         request_id: 'req-1',
         user_id: 'user-1',
         team_id: 'team-1',
-        type: 'content_moderation',
+        type: 'meal',
         user_input: 'https://example.com/img.jpg',
         raw_ai_output: complexJson,
       };

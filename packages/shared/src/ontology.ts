@@ -6,12 +6,11 @@ import { z } from 'zod';
 
 // Scan Type - Main classification categories
 export const ScanTypeEnum = z.enum([
-  'content_moderation',
-  'safety_check',
-  'quality_assessment',
-  'compliance_review',
-  'authenticity_verification',
-  'sentiment_analysis',
+  'meal',
+  'label',
+  'front_label',
+  'screenshot',
+  'others',
 ]);
 
 export type ScanType = z.infer<typeof ScanTypeEnum>;
