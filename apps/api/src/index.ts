@@ -9,6 +9,7 @@ import { feedbackRoutes } from './routes/feedback.routes.js';
 import { reviewRoutes } from './routes/review.routes.js';
 import { exportRoutes } from './routes/export.routes.js';
 import { analyticsRoutes } from './routes/analytics.routes.js';
+import { authRoutes } from './routes/auth.routes.js';
 import { AlertService } from './services/alert.service.js';
 
 const fastify = Fastify({
@@ -120,6 +121,7 @@ fastify.post('/users', async (request, reply) => {
 });
 
 // Import routes
+await authRoutes(fastify);
 await importRoutes(fastify, pool);
 
 // Task routes

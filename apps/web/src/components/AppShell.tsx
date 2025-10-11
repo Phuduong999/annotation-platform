@@ -20,6 +20,7 @@ import {
   IconEye,
   IconApi,
 } from '@tabler/icons-react';
+import { UserMenu } from './UserMenu';
 
 interface NavItem {
   label: string;
@@ -99,9 +100,7 @@ export function AppShell({ children }: AppShellProps) {
               D4T4L4B3lXAI
             </Title>
           </Group>
-          <Text size="sm" c="dimmed">
-            Data Annotation Platform
-          </Text>
+          <UserMenu />
         </Group>
       </MantineAppShell.Header>
 
