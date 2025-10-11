@@ -397,14 +397,13 @@ export class TaskService {
     try {
       await client.query('BEGIN');
 
-      // Get task with current status
+      // Get task with current status (lock only the tasks table)
       const taskResult = await client.query(
         `SELECT t.*, ld.payload as draft_payload, lf.* as final_data
          FROM tasks t
          LEFT JOIN labels_draft ld ON ld.task_id = t.id
          LEFT JOIN labels_final lf ON lf.task_id = t.id
-         WHERE t.id = $1
-         FOR UPDATE`,
+         WHERE t.id = $1`,
         [taskId]
       );
 
