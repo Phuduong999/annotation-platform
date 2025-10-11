@@ -44,23 +44,34 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
       try {
         const { status, user_id, limit = 100, offset = 0 } = request.query;
 
-        let query = 'SELECT * FROM tasks WHERE 1=1';
+        let query = `
+          SELECT 
+            t.*,
+            json_build_object(
+              'reaction', f.reaction,
+              'category', f.category,
+              'note', f.note
+            ) as end_user_feedback
+          FROM tasks t
+          LEFT JOIN feedback_events f ON t.request_id = f.request_id
+          WHERE 1=1
+        `;
         const params: any[] = [];
         let paramIndex = 1;
 
         if (status) {
-          query += ` AND status = $${paramIndex}`;
+          query += ` AND t.status = $${paramIndex}`;
           params.push(status);
           paramIndex++;
         }
 
         if (user_id) {
-          query += ` AND assigned_to = $${paramIndex}`;
+          query += ` AND t.assigned_to = $${paramIndex}`;
           params.push(user_id);
           paramIndex++;
         }
 
-        query += ` ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+        query += ` ORDER BY t.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
         params.push(limit, offset);
 
         const result = await pool.query(query, params);
@@ -134,9 +145,18 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
       try {
         const { id } = request.params;
 
-        // Get task details
+        // Get task details with feedback
         const taskResult = await pool.query(
-          'SELECT * FROM tasks WHERE id = $1',
+          `SELECT 
+            t.*,
+            json_build_object(
+              'reaction', f.reaction,
+              'category', f.category,
+              'note', f.note
+            ) as end_user_feedback
+          FROM tasks t
+          LEFT JOIN feedback_events f ON t.request_id = f.request_id
+          WHERE t.id = $1`,
           [id]
         );
 
