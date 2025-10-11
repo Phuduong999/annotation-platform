@@ -469,8 +469,8 @@ export function TaskList() {
             </Center>
           ) : (
             <>
-              <ScrollArea style={{ minHeight: 400 }}>
-                <Table striped highlightOnHover withTableBorder withColumnBorders verticalSpacing="sm">
+              <ScrollArea h="calc(100vh - 400px)" type="auto">
+                <Table striped highlightOnHover withTableBorder withColumnBorders verticalSpacing="sm" stickyHeader>
                   <Table.Thead>
                     <Table.Tr>
                       {visibleColumnDefinitions.map((column) => (
