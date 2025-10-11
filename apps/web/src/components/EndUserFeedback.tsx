@@ -5,9 +5,11 @@ import { EndUserFeedback as EndUserFeedbackType } from '../types/task.types';
 interface EndUserFeedbackProps {
   feedback: EndUserFeedbackType | null | undefined;
   onCategoryClick?: (category: string) => void;
+  userFullName?: string;
+  scanDate?: string;
 }
 
-export function EndUserFeedback({ feedback, onCategoryClick }: EndUserFeedbackProps) {
+export function EndUserFeedback({ feedback, onCategoryClick, userFullName, scanDate }: EndUserFeedbackProps) {
   if (!feedback) {
     return (
       <Card withBorder p="md">
@@ -134,13 +136,13 @@ export function EndUserFeedback({ feedback, onCategoryClick }: EndUserFeedbackPr
           <Group gap={4}>
             <IconUser size={12} />
             <Text size="xs" c="dimmed">
-              Source: {feedback.source}
+              Source: {userFullName || feedback.source}
             </Text>
           </Group>
           <Group gap={4}>
             <IconCalendar size={12} />
             <Text size="xs" c="dimmed">
-              {new Date(feedback.created_at).toLocaleString()}
+              {scanDate ? new Date(scanDate).toLocaleString() : new Date(feedback.created_at).toLocaleString()}
             </Text>
           </Group>
         </Group>

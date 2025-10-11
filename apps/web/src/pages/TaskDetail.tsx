@@ -12,7 +12,6 @@ import {
   Button,
   Select,
   Textarea,
-  TagsInput,
   Alert,
   Badge,
   ScrollArea,
@@ -25,7 +24,7 @@ import {
   Modal,
   CopyButton,
   Code,
-  HoverCard,
+  Radio,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
@@ -79,14 +78,22 @@ export function TaskDetail() {
     return validateNutrition(parsedAI.nutrition);
   }, [parsedAI.nutrition]);
 
+  // Check if AI output is empty (no result)
+  const isEmptyAIOutput = useMemo(() => {
+    if (!parsedAI) return true;
+    const hasEmptyNameFood = parsedAI.name_food === '' || !parsedAI.name_food;
+    const hasEmptyNutrition = !parsedAI.nutrition || (Array.isArray(parsedAI.nutrition) && parsedAI.nutrition.length === 0);
+    const hasEmptyIngredients = !parsedAI.ingredients || (Array.isArray(parsedAI.ingredients) && parsedAI.ingredients.length === 0);
+    return hasEmptyNameFood && hasEmptyNutrition && hasEmptyIngredients;
+  }, [parsedAI]);
+
   // Form setup
   const form = useForm<TaskAnnotation>({
     initialValues: {
       classification: 'others' as TaskAnnotation['classification'],
-      tags: [],
       nutrition: parsedAI.nutrition,
-      scan_type_judgement: undefined,
-      result_return_judgement: undefined,
+      result_return_judgement: isEmptyAIOutput ? 'no_result_return' : 'result_return',
+      feedback_correction: undefined,
     },
     validate: {
       classification: (value) => {
@@ -95,19 +102,19 @@ export function TaskDetail() {
         if (!validValues.includes(value)) return 'Invalid classification';
         return null;
       },
+      result_return_judgement: (value) => !value ? 'Result return judgement is required' : null,
     },
   });
 
-  // Update form when task loads
+  // Update form when task loads or AI output changes
   useEffect(() => {
     if (task?.result) {
       const classification = (task.result.classification || parsedAI.classification || 'others') as TaskAnnotation['classification'];
       form.setValues({
         classification,
-        tags: task.result.tags || [],
         nutrition: task.result.nutrition || parsedAI.nutrition,
-        scan_type_judgement: (task.result as any)?.scan_type_judgement,
-        result_return_judgement: (task.result as any)?.result_return_judgement,
+        result_return_judgement: (task.result as any)?.result_return_judgement || (isEmptyAIOutput ? 'no_result_return' : 'result_return'),
+        feedback_correction: (task.result as any)?.feedback_correction,
       });
     } else if (parsedAI.classification) {
       const validClassifications: TaskAnnotation['classification'][] = ['meal', 'label', 'front_label', 'screenshot', 'others'];
@@ -115,8 +122,9 @@ export function TaskDetail() {
         ? parsedAI.classification as TaskAnnotation['classification']
         : 'others';
       form.setFieldValue('classification', classification);
+      form.setFieldValue('result_return_judgement', isEmptyAIOutput ? 'no_result_return' : 'result_return');
     }
-  }, [task, parsedAI]);
+  }, [task, parsedAI, isEmptyAIOutput]);
 
   // Save mutation
   const saveMutation = useMutation({
@@ -249,23 +257,63 @@ export function TaskDetail() {
     }
   };
 
+  const [skipReason, setSkipReason] = useState<string>('');
+  const [skipReasonType, setSkipReasonType] = useState<'predefined' | 'custom'>('predefined');
+
+  const PREDEFINED_SKIP_REASONS = [
+    'Math Error Detected',
+    'Insufficient Image Quality',
+    'Generic/Vague Output',
+    'Missing Critical Info',
+  ];
+
   const handleSkip = () => {
     modals.openConfirmModal({
       title: 'Skip Task',
       children: (
         <Stack gap="sm">
-          <Text size="sm">Are you sure you want to skip this task?</Text>
-          <Textarea
-            placeholder="Reason for skipping (optional)"
-            id="skip-reason"
-          />
+          <Text size="sm">Select a reason for skipping this task:</Text>
+          <Radio.Group
+            value={skipReasonType}
+            onChange={(value) => setSkipReasonType(value as 'predefined' | 'custom')}
+          >
+            <Stack gap="xs">
+              <Radio value="predefined" label="Select from common reasons" />
+              <Radio value="custom" label="Enter custom reason" />
+            </Stack>
+          </Radio.Group>
+          
+          {skipReasonType === 'predefined' ? (
+            <Select
+              placeholder="Select reason"
+              data={PREDEFINED_SKIP_REASONS}
+              value={skipReason}
+              onChange={(value) => setSkipReason(value || '')}
+              required
+            />
+          ) : (
+            <Textarea
+              placeholder="Enter custom reason"
+              value={skipReason}
+              onChange={(e) => setSkipReason(e.currentTarget.value)}
+              required
+              minRows={3}
+            />
+          )}
         </Stack>
       ),
       labels: { confirm: 'Skip', cancel: 'Cancel' },
-      confirmProps: { color: 'yellow' },
+      confirmProps: { color: 'yellow', disabled: !skipReason },
       onConfirm: () => {
-        const reason = (document.getElementById('skip-reason') as HTMLTextAreaElement)?.value;
-        skipMutation.mutate(reason);
+        if (skipReason) {
+          skipMutation.mutate(skipReason);
+          setSkipReason('');
+          setSkipReasonType('predefined');
+        }
+      },
+      onCancel: () => {
+        setSkipReason('');
+        setSkipReasonType('predefined');
       },
     });
   };
@@ -502,60 +550,64 @@ export function TaskDetail() {
                           />
                         </Tooltip>
 
-                        {/* Scan Type Judgement */}
+                        {/* Result Return Judgement - Auto-detected */}
+                        <Stack gap={4}>
+                          <Tooltip 
+                            label="Auto-detected based on AI output. Empty output → No Result Returned"
+                            multiline
+                            w={280}
+                            position="top"
+                          >
+                            <Select
+                              label="Result Return Judgement"
+                              placeholder="Select judgement"
+                              data={[
+                                { value: 'result_return', label: 'Result Returned' },
+                                { value: 'no_result_return', label: 'No Result Returned' },
+                              ]}
+                              {...form.getInputProps('result_return_judgement')}
+                              required
+                              error={form.errors.result_return_judgement}
+                              allowDeselect={false}
+                            />
+                          </Tooltip>
+                          {isEmptyAIOutput && (
+                            <Text size="xs" c="dimmed" fs="italic">
+                              Auto-set: Empty AI output detected
+                            </Text>
+                          )}
+                        </Stack>
+
+                        {/* Feedback Correction */}
                         <Tooltip 
-                          label="Is the AI classification correct? Correct Type = AI got it right, Wrong Type = AI made a mistake"
+                          label="Evaluate end-user feedback accuracy if feedback exists"
                           multiline
                           w={280}
                           position="top"
                         >
                           <Select
-                            label="Scan Type Judgement"
-                            placeholder="Select judgement"
+                            label="Feedback Correction"
+                            placeholder="Evaluate feedback (if exists)"
                             data={[
-                              { value: 'correct_type', label: 'Correct Type' },
-                              { value: 'wrong_type', label: 'Wrong Type' },
+                              { value: 'correct_feedback', label: 'Correct Feedback' },
+                              { value: 'wrong_food', label: 'Wrong Food' },
+                              { value: 'incorrect_nutrition', label: 'Incorrect Nutrition' },
+                              { value: 'incorrect_ingredients', label: 'Incorrect Ingredients' },
+                              { value: 'wrong_portion_size', label: 'Wrong Portion Size' },
+                              { value: 'no_feedback', label: 'No Feedback' },
                             ]}
-                            {...form.getInputProps('scan_type_judgement')}
-                            required
-                            error={form.errors.scan_type_judgement}
-                            allowDeselect={false}
+                            {...form.getInputProps('feedback_correction')}
+                            error={form.errors.feedback_correction}
+                            clearable
                           />
                         </Tooltip>
-
-                        {/* Result Return Judgement */}
-                        <Tooltip 
-                          label="Should we return AI result to user? Result Returned = Yes, show to user | No Result Returned = No, don't show"
-                          multiline
-                          w={280}
-                          position="top"
-                        >
-                          <Select
-                            label="Result Return Judgement"
-                            placeholder="Select judgement"
-                            data={[
-                              { value: 'result_return', label: 'Result Returned' },
-                              { value: 'no_result_return', label: 'No Result Returned' },
-                            ]}
-                            {...form.getInputProps('result_return_judgement')}
-                            required
-                            error={form.errors.result_return_judgement}
-                            allowDeselect={false}
-                          />
-                        </Tooltip>
-
-                        {/* Tags */}
-                        <TagsInput
-                          label="Tags"
-                          placeholder="Enter tags"
-                          {...form.getInputProps('tags')}
-                          clearable
-                        />
 
                         {/* End-User Feedback - Read Only */}
                         <EndUserFeedback
                           feedback={task.end_user_feedback}
                           onCategoryClick={handleCategoryClick}
+                          userFullName={task.user_full_name}
+                          scanDate={task.scan_date}
                         />
 
                         {/* Task Metadata */}
@@ -564,7 +616,9 @@ export function TaskDetail() {
                             <Text size="xs" fw={500}>Task Info:</Text>
                             <Text size="xs">Request ID: {task.request_id}</Text>
                             <Text size="xs">Team: {task.team_id}</Text>
-                            <Text size="xs">Type: {task.type}</Text>
+                            <Text size="xs">
+                              Type: <Text component="span" fw={700} tt="uppercase">{task.type}</Text>
+                            </Text>
                             <Text size="xs">Confidence: {(task.ai_confidence * 100).toFixed(1)}%</Text>
                             <Text size="xs">Date: {new Date(task.scan_date).toLocaleString()}</Text>
                           </Stack>
@@ -594,7 +648,6 @@ export function TaskDetail() {
                           loading={submitMutation.isPending}
                           disabled={
                             !form.values.classification ||
-                            !form.values.scan_type_judgement ||
                             !form.values.result_return_judgement
                           }
                         >

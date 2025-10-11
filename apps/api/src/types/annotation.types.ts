@@ -10,12 +10,12 @@ export type ScanType = 'meal' | 'label' | 'front_label' | 'screenshot' | 'others
 
 export type ResultReturn = 'correct_result' | 'wrong_result' | 'no_result';
 
-export type FeedbackCorrection = 'wrong_food' | 'incorrect_nutrition' | 'incorrect_ingredients' | 'wrong_portion_size';
+export type FeedbackCorrection = 'wrong_food' | 'incorrect_nutrition' | 'incorrect_ingredients' | 'wrong_portion_size' | 'no_feedback' | 'correct_feedback';
 
 export interface AnnotationRequest {
   scan_type: ScanType;
   result_return: ResultReturn;
-  feedback_correction: FeedbackCorrection;
+  feedback_correction?: FeedbackCorrection;
   note?: string;
   draft?: boolean;
 }
@@ -81,7 +81,7 @@ export interface TaskWithAnnotations {
 // Validation helpers
 export const SCAN_TYPES: ScanType[] = ['meal', 'label', 'front_label', 'screenshot', 'others'];
 export const RESULT_RETURNS: ResultReturn[] = ['correct_result', 'wrong_result', 'no_result'];
-export const FEEDBACK_CORRECTIONS: FeedbackCorrection[] = ['wrong_food', 'incorrect_nutrition', 'incorrect_ingredients', 'wrong_portion_size'];
+export const FEEDBACK_CORRECTIONS: FeedbackCorrection[] = ['wrong_food', 'incorrect_nutrition', 'incorrect_ingredients', 'wrong_portion_size', 'no_feedback', 'correct_feedback'];
 
 export function validateScanType(value: string): value is ScanType {
   return SCAN_TYPES.includes(value as ScanType);
@@ -106,7 +106,7 @@ export function validateAnnotation(annotation: AnnotationRequest): string[] {
     errors.push(`Invalid result_return. Must be one of: ${RESULT_RETURNS.join(', ')}`);
   }
   
-  if (!validateFeedbackCorrection(annotation.feedback_correction)) {
+  if (annotation.feedback_correction && !validateFeedbackCorrection(annotation.feedback_correction)) {
     errors.push(`Invalid feedback_correction. Must be one of: ${FEEDBACK_CORRECTIONS.join(', ')}`);
   }
   

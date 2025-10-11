@@ -35,8 +35,9 @@ export interface Task {
 
 export interface TaskResult {
   classification: string;
-  tags?: string[];
   nutrition?: NutritionData;
+  result_return_judgement?: string;
+  feedback_correction?: string;
   annotated_by?: string;
   annotated_at?: string;
 }
@@ -115,10 +116,9 @@ export interface ParsedAIOutput {
 
 export interface TaskAnnotation {
   classification: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
-  tags: string[];
   nutrition?: NutritionData;
-  scan_type_judgement?: 'correct_type' | 'wrong_type';
   result_return_judgement?: 'result_return' | 'no_result_return';
+  feedback_correction?: 'wrong_food' | 'incorrect_nutrition' | 'incorrect_ingredients' | 'wrong_portion_size' | 'no_feedback' | 'correct_feedback';
 }
 
 export interface EndUserFeedback {
