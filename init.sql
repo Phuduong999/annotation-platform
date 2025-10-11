@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     assigned_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT check_task_status CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'assigned'))
+    CONSTRAINT check_task_status CHECK (status IN ('pending', 'assigned', 'in_progress', 'processing', 'completed', 'failed', 'skipped'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);
