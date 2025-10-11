@@ -25,6 +25,7 @@ import {
   Modal,
   CopyButton,
   Code,
+  HoverCard,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
@@ -274,28 +275,7 @@ export function TaskDetail() {
     navigate(`/tasks?category=${encodeURIComponent(category)}`);
   };
 
-  const annotationGuidelines = [
-    {
-      type: 'Meal',
-      description: 'Use for prepared food or dishes that require nutrition estimation.',
-    },
-    {
-      type: 'Label',
-      description: 'Use for nutrition labels or packaging text that needs transcription.',
-    },
-    {
-      type: 'Front Label',
-      description: 'Use for front-of-pack imagery highlighting marketing claims.',
-    },
-    {
-      type: 'Screenshot',
-      description: 'Use for app or web screenshots documenting digital flows.',
-    },
-    {
-      type: 'Others',
-      description: 'Use when the asset does not match any other category.',
-    },
-  ];
+
 
   // Hotkeys
   useHotkeys('ctrl+s, cmd+s', (e) => {
@@ -499,49 +479,70 @@ export function TaskDetail() {
                     <form>
                       <Stack gap="md">
                         {/* Classification */}
-                        <Select
-                          label="Classification"
-                          placeholder="Select classification"
-                          data={[
-                            { value: 'meal', label: 'Meal (1)' },
-                            { value: 'label', label: 'Label (2)' },
-                            { value: 'front_label', label: 'Front Label (3)' },
-                            { value: 'screenshot', label: 'Screenshot (4)' },
-                            { value: 'others', label: 'Others (5)' },
-                          ]}
-                          {...form.getInputProps('classification')}
-                          required
-                          error={form.errors.classification}
-                          allowDeselect={false}
-                        />
+                        <Tooltip 
+                          label="Meal: Prepared food | Label: Nutrition facts | Front Label: Marketing text | Screenshot: Digital source | Others: Unclear/invalid"
+                          multiline
+                          w={300}
+                          position="top"
+                        >
+                          <Select
+                            label="Classification"
+                            placeholder="Select classification"
+                            data={[
+                              { value: 'meal', label: 'Meal (1)' },
+                              { value: 'label', label: 'Label (2)' },
+                              { value: 'front_label', label: 'Front Label (3)' },
+                              { value: 'screenshot', label: 'Screenshot (4)' },
+                              { value: 'others', label: 'Others (5)' },
+                            ]}
+                            {...form.getInputProps('classification')}
+                            required
+                            error={form.errors.classification}
+                            allowDeselect={false}
+                          />
+                        </Tooltip>
 
                         {/* Scan Type Judgement */}
-                        <Select
-                          label="Scan Type Judgement"
-                          placeholder="Select judgement"
-                          data={[
-                            { value: 'correct_type', label: 'Correct Type' },
-                            { value: 'wrong_type', label: 'Wrong Type' },
-                          ]}
-                          {...form.getInputProps('scan_type_judgement')}
-                          required
-                          error={form.errors.scan_type_judgement}
-                          allowDeselect={false}
-                        />
+                        <Tooltip 
+                          label="Is the AI classification correct? Correct Type = AI got it right, Wrong Type = AI made a mistake"
+                          multiline
+                          w={280}
+                          position="top"
+                        >
+                          <Select
+                            label="Scan Type Judgement"
+                            placeholder="Select judgement"
+                            data={[
+                              { value: 'correct_type', label: 'Correct Type' },
+                              { value: 'wrong_type', label: 'Wrong Type' },
+                            ]}
+                            {...form.getInputProps('scan_type_judgement')}
+                            required
+                            error={form.errors.scan_type_judgement}
+                            allowDeselect={false}
+                          />
+                        </Tooltip>
 
                         {/* Result Return Judgement */}
-                        <Select
-                          label="Result Return Judgement"
-                          placeholder="Select judgement"
-                          data={[
-                            { value: 'result_return', label: 'Result Returned' },
-                            { value: 'no_result_return', label: 'No Result Returned' },
-                          ]}
-                          {...form.getInputProps('result_return_judgement')}
-                          required
-                          error={form.errors.result_return_judgement}
-                          allowDeselect={false}
-                        />
+                        <Tooltip 
+                          label="Should we return AI result to user? Result Returned = Yes, show to user | No Result Returned = No, don't show"
+                          multiline
+                          w={280}
+                          position="top"
+                        >
+                          <Select
+                            label="Result Return Judgement"
+                            placeholder="Select judgement"
+                            data={[
+                              { value: 'result_return', label: 'Result Returned' },
+                              { value: 'no_result_return', label: 'No Result Returned' },
+                            ]}
+                            {...form.getInputProps('result_return_judgement')}
+                            required
+                            error={form.errors.result_return_judgement}
+                            allowDeselect={false}
+                          />
+                        </Tooltip>
 
                         {/* Tags */}
                         <TagsInput
@@ -616,22 +617,7 @@ export function TaskDetail() {
                 </Stack>
               </Card>
 
-              <Card withBorder p="md">
-                <Stack gap="sm">
-                  <Title order={5}>Annotation Guide</Title>
-                  <Divider />
-                  <Stack gap="sm">
-                    {annotationGuidelines.map((item) => (
-                      <Paper key={item.type} p="sm" withBorder radius="md">
-                        <Stack gap={4}>
-                          <Text fw={600} size="sm">{item.type}</Text>
-                          <Text size="xs" c="dimmed">{item.description}</Text>
-                        </Stack>
-                      </Paper>
-                    ))}
-                  </Stack>
-                </Stack>
-              </Card>
+
             </Stack>
           </Grid.Col>
         </Grid>
