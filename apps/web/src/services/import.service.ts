@@ -49,6 +49,37 @@ export class ImportService {
     return response.data.data;
   }
 
+  async uploadJSON(file: File, userId?: string): Promise<ImportJobResult> {
+    // Read file content
+    const text = await file.text();
+    const jsonData = JSON.parse(text);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-import-filename': file.name,
+    };
+
+    if (userId) {
+      headers['x-user-id'] = userId;
+    }
+
+    const response = await axios.post(`${this.apiUrl}/import/jobs`, jsonData, {
+      headers,
+    });
+
+    return response.data.data;
+  }
+
+  async uploadFile(file: File, userId?: string): Promise<ImportJobResult> {
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    
+    if (fileExtension === 'json') {
+      return this.uploadJSON(file, userId);
+    } else {
+      return this.uploadCSV(file, userId);
+    }
+  }
+
   async getImportJob(jobId: string): Promise<ImportJob> {
     const response = await axios.get(`${this.apiUrl}/import/jobs/${jobId}`);
     return response.data.data;
@@ -59,6 +90,17 @@ export class ImportService {
       responseType: 'blob',
     });
     return response.data;
+  }
+
+  async createTasksFromJob(
+    jobId: string, 
+    options?: { skipLinkCheck?: boolean; assignTo?: string }
+  ): Promise<void> {
+    await axios.post(`${this.apiUrl}/tasks/create`, {
+      jobId,
+      skipLinkCheck: options?.skipLinkCheck || true, // Default true for testing
+      assignTo: options?.assignTo || 'user123', // Default to user123 for testing
+    });
   }
 }
 

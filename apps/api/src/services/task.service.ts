@@ -59,14 +59,19 @@ export class TaskService {
   constructor(private pool: Pool) {}
 
   /**
-   * Create tasks from valid import rows with link_status=ok
+   * Create tasks from valid import rows
    * 
-   * STRATEGY: Option 1 implementation
-   * - Only creates tasks for valid import_rows where assets have link_status='ok'
+   * STRATEGY: Option 1 implementation (with optional skip link check)
+   * - Creates tasks for valid import_rows
+   * - Can skip link check for testing (skipLinkCheck=true)
+   * - Can assign to specific user (assignTo='user123')
    * - Prevents duplicate tasks (idempotent)
    * - Validates ScanTypeEnum values during task creation
    */
-  async createTasksFromImportJob(jobId: string): Promise<TaskCreationResult> {
+  async createTasksFromImportJob(
+    jobId: string, 
+    options?: { skipLinkCheck?: boolean; assignTo?: string }
+  ): Promise<TaskCreationResult> {
     const result: TaskCreationResult = {
       totalRows: 0,
       tasksCreated: 0,
@@ -92,7 +97,8 @@ export class TaskService {
 
       try {
         // Skip if link status is not 'ok' (prevents broken image tasks)
-        if (row.link_status !== 'ok') {
+        // Unless skipLinkCheck is true (for testing)
+        if (!options?.skipLinkCheck && row.link_status !== 'ok') {
           result.tasksSkipped++;
           const reason = row.link_status || 'no_link_check';
           result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1;
@@ -136,21 +142,32 @@ export class TaskService {
           continue;
         }
 
-        // Create task with proper field mapping
+        // Create task with proper field mapping (including extended fields)
+        // Assign to specified user if provided, otherwise leave unassigned
         await this.pool.query(
           `INSERT INTO tasks 
-           (import_row_id, request_id, user_id, team_id, scan_type, user_input, raw_ai_output, ai_confidence, scan_date, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')`,
+           (import_row_id, request_id, user_id, team_id, scan_type, user_input, raw_ai_output, 
+            ai_confidence, scan_date, status, assigned_to, user_email, user_full_name, user_log, 
+            raw_user_log, is_logged, edit_category, ai_output_log)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $12, $13, $14, $15, $16, $17)`,
           [
-            row.id,                    // Link to import_row
-            requestId,                 // request_id
-            rowData.user_id,          // user_id 
-            rowData.team_id,          // team_id
-            rowData.type,             // CSV 'type' → DB 'scan_type'
-            rowData.user_input,       // user_input (image URL)
-            parsedAiOutput,           // parsed JSON
-            aiConfidence,             // extracted confidence score
-            new Date(rowData.date),   // CSV 'date' → DB 'scan_date'
+            row.id,                                                      // $1: import_row_id
+            requestId,                                                   // $2: request_id
+            rowData.user_id,                                            // $3: user_id 
+            rowData.team_id,                                            // $4: team_id
+            rowData.type,                                               // $5: scan_type
+            rowData.user_input,                                         // $6: user_input (image URL)
+            parsedAiOutput,                                             // $7: raw_ai_output (parsed JSON)
+            aiConfidence,                                               // $8: ai_confidence
+            new Date(rowData.date),                                     // $9: scan_date
+            options?.assignTo || null,                                  // $10: assigned_to (from options)
+            rowData.user_email || null,                                 // $11: user_email
+            rowData.user_full_name || null,                             // $12: user_full_name
+            rowData.user_log || null,                                   // $13: user_log
+            rowData.raw_user_log || null,                               // $14: raw_user_log
+            rowData.is_logged === 'true' ? true : (rowData.is_logged === 'false' ? false : null),  // $15: is_logged
+            rowData.edit_category || null,                              // $16: edit_category
+            rowData.ai_output_log || null,                              // $17: ai_output_log
           ]
         );
 

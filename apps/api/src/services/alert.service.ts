@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { getPool } from '../config/database';
+import { getPool } from '../config/database.js';
 import { 
   AlertRule, 
   Alert, 
@@ -27,7 +27,7 @@ export class AlertService extends EventEmitter {
   private constructor() {
     super();
     this.pool = getPool();
-    this.metricsService = MetricsService.getInstance();
+    this.metricsService = MetricsService.getInstance(this.pool);
   }
 
   static getInstance(): AlertService {
@@ -427,7 +427,7 @@ export class AlertService extends EventEmitter {
   }
 
   /**
-   * Send webhook notification
+   * Send webhook notification with event logging
    */
   private async sendWebhookNotification(alert: Alert, rule: AlertRule): Promise<void> {
     try {
@@ -438,34 +438,92 @@ export class AlertService extends EventEmitter {
       }
       
       const payload = {
+        event_type: 'alert_triggered',
+        timestamp: new Date().toISOString(),
         alert: {
           id: alert.id,
           severity: alert.severity,
+          status: alert.status,
           message: alert.message,
-          metricValue: alert.metricValue,
+          metric_value: alert.metricValue,
           threshold: alert.threshold,
-          triggeredAt: alert.triggeredAt,
+          project_id: alert.projectId,
+          triggered_at: alert.triggeredAt,
         },
         rule: {
           id: rule.id,
           name: rule.name,
-          metricType: rule.metricType,
+          metric_type: rule.metricType,
+          condition: rule.condition,
+          evaluation_period: rule.evaluationPeriod,
+        },
+        context: {
+          environment: process.env.NODE_ENV || 'development',
+          service: 'D4T4L4B3lXAI',
         },
       };
+      
+      // Log the webhook attempt
+      console.log(`Sending webhook for alert ${alert.id} to ${webhookUrl}`);
       
       const response = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'User-Agent': 'D4T4L4B3lXAI-AlertService/1.0',
         },
         body: JSON.stringify(payload),
       });
       
       if (!response.ok) {
-        throw new Error(`Webhook failed: ${response.statusText}`);
+        throw new Error(`Webhook HTTP ${response.status}: ${response.statusText}`);
       }
+      
+      // Log successful webhook
+      console.log(`Webhook sent successfully for alert ${alert.id}`);
+      
+      // Store webhook event in database
+      await this.logWebhookEvent(alert, rule, payload, 'success');
+      
     } catch (error) {
-      console.error('Failed to send webhook notification:', error);
+      console.error(`Failed to send webhook for alert ${alert.id}:`, error);
+      
+      // Store failed webhook event
+      await this.logWebhookEvent(alert, rule, null, 'failed', error instanceof Error ? error.message : String(error));
+    }
+  }
+  
+  /**
+   * Log webhook events to database
+   */
+  private async logWebhookEvent(
+    alert: Alert,
+    rule: AlertRule,
+    payload: any,
+    status: 'success' | 'failed',
+    errorMessage?: string
+  ): Promise<void> {
+    try {
+      const query = `
+        INSERT INTO webhook_events (
+          alert_id, rule_id, webhook_url, payload,
+          status, error_message, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `;
+      
+      const values = [
+        alert.id,
+        rule.id,
+        process.env.ALERT_WEBHOOK_URL,
+        payload ? JSON.stringify(payload) : null,
+        status,
+        errorMessage || null,
+      ];
+      
+      await this.pool.query(query, values);
+    } catch (error) {
+      console.error('Failed to log webhook event:', error);
     }
   }
 
@@ -511,7 +569,7 @@ export class AlertService extends EventEmitter {
       rule.condition,
       rule.threshold,
       rule.evaluationPeriod,
-      rule.projectId || null,
+      rule.projectId || '', // Empty string for global rules (NOT NULL constraint)
       rule.isActive,
       rule.notificationChannels ? JSON.stringify(rule.notificationChannels) : null,
       rule.createdBy,
@@ -584,7 +642,9 @@ export class AlertService extends EventEmitter {
       projectId: row.project_id,
       isActive: row.is_active,
       notificationChannels: row.notification_channels 
-        ? JSON.parse(row.notification_channels) 
+        ? (typeof row.notification_channels === 'string' 
+            ? JSON.parse(row.notification_channels) 
+            : row.notification_channels) // JSONB already parsed by pg driver
         : undefined,
       createdBy: row.created_by,
       createdAt: row.created_at,

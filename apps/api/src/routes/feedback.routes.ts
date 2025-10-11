@@ -7,6 +7,12 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
     '/events/feedback',
     {
       schema: {
+        headers: {
+          type: 'object',
+          properties: {
+            'idempotency-key': { type: 'string', maxLength: 255 },
+          },
+        },
         body: {
           type: 'object',
           required: ['request_id', 'reaction'],
@@ -24,6 +30,9 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
     },
     async (
       request: FastifyRequest<{
+        Headers: {
+          'idempotency-key'?: string;
+        };
         Body: {
           request_id: string;
           user_event_id?: string;
@@ -46,12 +55,32 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
           source = 'end_user',
           metadata,
         } = request.body;
+        
+        const idempotencyKey = request.headers['idempotency-key'];
+
+        // Check for existing feedback with idempotency key first
+        if (idempotencyKey) {
+          const existingByKey = await pool.query(
+            'SELECT * FROM feedback_events WHERE idempotency_key = $1',
+            [idempotencyKey]
+          );
+          
+          if (existingByKey.rows.length > 0) {
+            // Return existing record with 200 status (idempotent)
+            return reply.code(200).send({
+              success: true,
+              data: existingByKey.rows[0],
+              message: 'Feedback already exists (idempotent)',
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
 
         // Insert feedback event
         const result = await pool.query(
           `INSERT INTO feedback_events 
-           (request_id, user_event_id, reaction, category, note, source, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           (request_id, user_event_id, reaction, category, note, source, metadata, idempotency_key)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING *`,
           [
             request_id,
@@ -61,6 +90,7 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
             note || null,
             source,
             metadata ? JSON.stringify(metadata) : null,
+            idempotencyKey || null,
           ]
         );
 
@@ -69,8 +99,33 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
           data: result.rows[0],
           timestamp: new Date().toISOString(),
         });
-      } catch (error) {
+      } catch (error: any) {
         fastify.log.error(error);
+        
+        // Handle unique constraint violations (409 Conflict)
+        if (error.code === '23505') { // PostgreSQL unique violation
+          if (error.constraint?.includes('unique_request_user_event') || 
+              error.constraint?.includes('unique_request_only')) {
+            return reply.code(409).send({
+              success: false,
+              error: 'Feedback already exists for this request',
+              error_code: 'DUPLICATE_FEEDBACK',
+              details: 'A feedback event already exists for this request_id and user_event_id combination',
+              timestamp: new Date().toISOString(),
+            });
+          }
+          
+          if (error.constraint?.includes('unique_idempotency_key')) {
+            return reply.code(409).send({
+              success: false,
+              error: 'Duplicate request detected',
+              error_code: 'DUPLICATE_IDEMPOTENCY_KEY',
+              details: 'This idempotency key has already been used',
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
+        
         return reply.code(500).send({
           success: false,
           error: error instanceof Error ? error.message : 'Internal server error',
@@ -138,7 +193,7 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
     }
   );
 
-  // GET /events/feedback - List feedback with filters
+  // GET /events/feedback - List feedback with filters and pagination
   fastify.get(
     '/events/feedback',
     {
@@ -146,13 +201,14 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
         querystring: {
           type: 'object',
           properties: {
+            request_id: { type: 'string' },
             reaction: { type: 'string', enum: ['like', 'dislike', 'neutral'] },
             category: { type: 'string' },
             source: { type: 'string' },
-            from_date: { type: 'string' },
-            to_date: { type: 'string' },
-            limit: { type: 'number' },
-            offset: { type: 'number' },
+            from_date: { type: 'string', format: 'date-time' },
+            to_date: { type: 'string', format: 'date-time' },
+            limit: { type: 'number', minimum: 1, maximum: 1000, default: 100 },
+            offset: { type: 'number', minimum: 0, default: 0 },
           },
         },
       },
@@ -160,6 +216,7 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
     async (
       request: FastifyRequest<{
         Querystring: {
+          request_id?: string;
           reaction?: 'like' | 'dislike' | 'neutral';
           category?: string;
           source?: string;
@@ -173,6 +230,7 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
     ) => {
       try {
         const {
+          request_id,
           reaction,
           category,
           source,
@@ -182,45 +240,67 @@ export async function feedbackRoutes(fastify: FastifyInstance, pool: Pool) {
           offset = 0,
         } = request.query;
 
-        let query = 'SELECT * FROM feedback_events WHERE 1=1';
+        // Build WHERE conditions
+        let whereClause = 'WHERE 1=1';
         const params: any[] = [];
         let paramCount = 0;
 
+        if (request_id) {
+          whereClause += ` AND request_id = $${++paramCount}`;
+          params.push(request_id);
+        }
+
         if (reaction) {
-          query += ` AND reaction = $${++paramCount}`;
+          whereClause += ` AND reaction = $${++paramCount}`;
           params.push(reaction);
         }
 
         if (category) {
-          query += ` AND category = $${++paramCount}`;
-          params.push(category);
+          whereClause += ` AND category ILIKE $${++paramCount}`;
+          params.push(`%${category}%`);
         }
 
         if (source) {
-          query += ` AND source = $${++paramCount}`;
+          whereClause += ` AND source = $${++paramCount}`;
           params.push(source);
         }
 
         if (from_date) {
-          query += ` AND created_at >= $${++paramCount}`;
+          whereClause += ` AND created_at >= $${++paramCount}`;
           params.push(from_date);
         }
 
         if (to_date) {
-          query += ` AND created_at <= $${++paramCount}`;
+          whereClause += ` AND created_at <= $${++paramCount}`;
           params.push(to_date);
         }
 
-        query += ` ORDER BY created_at DESC`;
-        query += ` LIMIT $${++paramCount} OFFSET $${++paramCount}`;
-        params.push(limit, offset);
+        // Get total count
+        const countQuery = `SELECT COUNT(*) FROM feedback_events ${whereClause}`;
+        const countResult = await pool.query(countQuery, params);
+        const total = parseInt(countResult.rows[0].count);
 
-        const result = await pool.query(query, params);
+        // Get paginated results
+        const dataQuery = `
+          SELECT id, request_id, user_event_id, reaction, category, note, 
+                 source, metadata, created_at, idempotency_key
+          FROM feedback_events 
+          ${whereClause}
+          ORDER BY created_at DESC
+          LIMIT $${++paramCount} OFFSET $${++paramCount}`;
+        params.push(limit, offset);
+        
+        const dataResult = await pool.query(dataQuery, params);
 
         return reply.code(200).send({
           success: true,
-          data: result.rows,
-          total: result.rows.length,
+          data: {
+            events: dataResult.rows,
+            total,
+            limit,
+            offset,
+            has_more: offset + limit < total,
+          },
           timestamp: new Date().toISOString(),
         });
       } catch (error) {

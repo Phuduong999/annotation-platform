@@ -7,10 +7,10 @@ export interface Task {
   request_id: string;
   user_id: string;
   team_id: string;
-  type: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others'; // this need to come from csv data, we need to 
+  type: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
   user_input: string;
   raw_ai_output: string;
-  ai_confidence: number; // need to remove
+  ai_confidence: number;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   assigned_to: string | null;
   assigned_at: string | null;
@@ -19,7 +19,15 @@ export interface Task {
   result: TaskResult | null;
   created_at: string;
   updated_at: string;
+  // Extended user fields from JSON import
   user_email?: string | null;
+  user_full_name?: string | null;
+  user_log?: string | null;
+  raw_user_log?: string | null;
+  is_logged?: boolean | null;
+  edit_category?: string | null;
+  ai_output_log?: string | null;
+  // Legacy fields
   logs?: string | null;
   raw_json?: unknown;
   end_user_feedback?: EndUserFeedback | null;

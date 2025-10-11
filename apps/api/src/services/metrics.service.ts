@@ -112,7 +112,19 @@ export const metrics = {
 };
 
 export class MetricsService {
-  constructor(private pool: Pool) {}
+  private static instance: MetricsService;
+  
+  private constructor(private pool: Pool) {}
+  
+  static getInstance(pool?: Pool): MetricsService {
+    if (!MetricsService.instance) {
+      if (!pool) {
+        throw new Error('Pool must be provided for first getInstance call');
+      }
+      MetricsService.instance = new MetricsService(pool);
+    }
+    return MetricsService.instance;
+  }
 
   // Update metrics from database
   async updateMetrics() {

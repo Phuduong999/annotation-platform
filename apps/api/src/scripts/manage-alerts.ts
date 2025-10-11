@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { AlertService } from '../services/alert.service';
-import { MetricType } from '../types/analytics';
-import { getPool } from '../config/database';
+import { AlertService } from '../services/alert.service.js';
+import { MetricType } from '../types/analytics.js';
+import { getPool } from '../config/database.js';
 
 const program = new Command();
 const alertService = AlertService.getInstance();

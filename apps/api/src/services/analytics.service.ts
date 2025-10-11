@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { getPool } from '../config/database';
+import { getPool } from '../config/database.js';
 import { 
   MetricType, 
   AggregationPeriod, 
@@ -24,7 +24,7 @@ export class AnalyticsService {
 
   constructor() {
     this.pool = getPool();
-    this.metricsService = MetricsService.getInstance();
+    this.metricsService = MetricsService.getInstance(this.pool);
   }
 
   async getCurrentMetrics(params: {

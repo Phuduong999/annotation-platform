@@ -22,9 +22,11 @@ import {
   Pagination,
   Menu,
   Checkbox,
+  Avatar,
+  Tooltip,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconRefresh, IconEye, IconPlayerPlay, IconUpload, IconColumns } from '@tabler/icons-react';
+import { IconRefresh, IconEye, IconPlayerPlay, IconUpload, IconColumns, IconPhoto } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { taskService } from '../services/task.service';
 import { Task, TaskFilter, TaskListResponse } from '../types/task.types';
@@ -50,6 +52,7 @@ const getStatusColor = (status: Task['status']) => STATUS_COLOR_MAP[status] ?? '
 const getTypeColor = (type: Task['type']) => TYPE_COLOR_MAP[type] ?? 'gray';
 
 type ColumnKey =
+  | 'image_preview'
   | 'request_id'
   | 'type'
   | 'user_input'
@@ -57,6 +60,10 @@ type ColumnKey =
   | 'assigned_to'
   | 'created_at'
   | 'user_email'
+  | 'user_full_name'
+  | 'user_log'
+  | 'is_logged'
+  | 'edit_category'
   | 'logs'
   | 'raw_json';
 
@@ -68,6 +75,23 @@ interface ColumnDefinition {
 }
 
 const COLUMN_DEFINITIONS: ColumnDefinition[] = [
+  {
+    key: 'image_preview',
+    label: 'Image',
+    defaultVisible: true,
+    render: (task) => (
+      <Tooltip label="Click to view task details">
+        <Avatar
+          src={task.user_input}
+          alt="Task preview"
+          radius="sm"
+          size="md"
+        >
+          <IconPhoto size={20} />
+        </Avatar>
+      </Tooltip>
+    ),
+  },
   {
     key: 'request_id',
     label: 'Request ID',
@@ -129,6 +153,38 @@ const COLUMN_DEFINITIONS: ColumnDefinition[] = [
     label: 'User Email',
     defaultVisible: false,
     render: (task) => <Text size="sm">{task.user_email || '-'}</Text>,
+  },
+  {
+    key: 'user_full_name',
+    label: 'User Name',
+    defaultVisible: false,
+    render: (task) => <Text size="sm">{task.user_full_name || '-'}</Text>,
+  },
+  {
+    key: 'user_log',
+    label: 'User Log',
+    defaultVisible: false,
+    render: (task) => (
+      <Text size="xs" c="dimmed" maw={280} lineClamp={1} title={task.user_log || ''}>
+        {task.user_log || '-'}
+      </Text>
+    ),
+  },
+  {
+    key: 'is_logged',
+    label: 'Is Logged',
+    defaultVisible: false,
+    render: (task) => (
+      <Badge color={task.is_logged ? 'green' : 'gray'} size="sm" variant="light">
+        {task.is_logged ? 'Yes' : 'No'}
+      </Badge>
+    ),
+  },
+  {
+    key: 'edit_category',
+    label: 'Edit Category',
+    defaultVisible: false,
+    render: (task) => <Text size="sm">{task.edit_category || '-'}</Text>,
   },
   {
     key: 'logs',
@@ -538,6 +594,18 @@ export function TaskList() {
                   <Text size="sm" fw={500}>User ID</Text>
                   <Code>{selectedTask.user_id}</Code>
                 </Group>
+                {selectedTask.user_email && (
+                  <Group justify="space-between">
+                    <Text size="sm" fw={500}>User Email</Text>
+                    <Text size="sm">{selectedTask.user_email}</Text>
+                  </Group>
+                )}
+                {selectedTask.user_full_name && (
+                  <Group justify="space-between">
+                    <Text size="sm" fw={500}>User Name</Text>
+                    <Text size="sm">{selectedTask.user_full_name}</Text>
+                  </Group>
+                )}
                 <Group justify="space-between">
                   <Text size="sm" fw={500}>Team ID</Text>
                   <Code>{selectedTask.team_id}</Code>
@@ -546,8 +614,54 @@ export function TaskList() {
                   <Text size="sm" fw={500}>Assigned To</Text>
                   <Text size="sm">{selectedTask.assigned_to || 'Unassigned'}</Text>
                 </Group>
+                {selectedTask.is_logged !== null && selectedTask.is_logged !== undefined && (
+                  <Group justify="space-between">
+                    <Text size="sm" fw={500}>Is Logged</Text>
+                    <Badge color={selectedTask.is_logged ? 'green' : 'gray'} size="sm" variant="light">
+                      {selectedTask.is_logged ? 'Yes' : 'No'}
+                    </Badge>
+                  </Group>
+                )}
               </Stack>
             </div>
+
+            <Divider />
+
+            {/* User Logs & Categories (if present) */}
+            {(selectedTask.user_log || selectedTask.edit_category || selectedTask.raw_user_log) && (
+              <>
+                <Divider />
+                <div>
+                  <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
+                    User Logs & Categories
+                  </Text>
+                  <Stack gap="xs">
+                    {selectedTask.edit_category && (
+                      <Group justify="space-between">
+                        <Text size="sm" fw={500}>Edit Category</Text>
+                        <Badge size="sm">{selectedTask.edit_category}</Badge>
+                      </Group>
+                    )}
+                    {selectedTask.user_log && (
+                      <>
+                        <Text size="sm" fw={500}>User Log</Text>
+                        <Code block style={{ whiteSpace: 'pre-wrap', fontSize: '11px' }}>
+                          {selectedTask.user_log}
+                        </Code>
+                      </>
+                    )}
+                    {selectedTask.raw_user_log && (
+                      <>
+                        <Text size="sm" fw={500}>Raw User Log</Text>
+                        <Code block style={{ whiteSpace: 'pre-wrap', fontSize: '11px' }}>
+                          {selectedTask.raw_user_log}
+                        </Code>
+                      </>
+                    )}
+                  </Stack>
+                </div>
+              </>
+            )}
 
             <Divider />
 

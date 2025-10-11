@@ -9,6 +9,7 @@ import { feedbackRoutes } from './routes/feedback.routes.js';
 import { reviewRoutes } from './routes/review.routes.js';
 import { exportRoutes } from './routes/export.routes.js';
 import { analyticsRoutes } from './routes/analytics.routes.js';
+import { AlertService } from './services/alert.service.js';
 
 const fastify = Fastify({
   logger: true,
@@ -148,11 +149,24 @@ const start = async () => {
     // Start alert monitoring if enabled
     if (process.env.ENABLE_ALERT_MONITORING === 'true') {
       try {
-        const { AlertService } = await import('./services/alert.service.js');
         const alertService = AlertService.getInstance();
         const interval = parseInt(process.env.ALERT_EVALUATION_INTERVAL || '60') * 1000;
+        
+        // Setup webhook event logging
+        alertService.on('alert', (notification) => {
+          fastify.log.info(`Alert triggered: ${notification.alert.message}`, {
+            alertId: notification.alert.id,
+            severity: notification.alert.severity,
+            metricType: notification.rule.metricType,
+            metricValue: notification.alert.metricValue,
+            threshold: notification.alert.threshold,
+            channel: notification.channel
+          });
+        });
+        
         await alertService.start(interval);
         fastify.log.info(`Alert monitoring started with ${interval / 1000}s interval`);
+        fastify.log.info(`Webhook URL configured: ${process.env.ALERT_WEBHOOK_URL ? 'Yes' : 'No'}`);
       } catch (error) {
         fastify.log.error('Failed to start alert monitoring:', error);
       }

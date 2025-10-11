@@ -62,6 +62,7 @@ const jsonStringSchema = z.string().refine(
 
 // CSV Row Schema
 export const CsvRowSchema = z.object({
+  // Required fields
   date: iso8601DateSchema.describe('ISO-8601 formatted date'),
   request_id: z.string().min(1).describe('Unique request identifier'),
   user_id: z.string().min(1).describe('User identifier'),
@@ -69,6 +70,15 @@ export const CsvRowSchema = z.object({
   type: ScanTypeEnum.describe('Scan type from ontology'),
   user_input: imageUrlSchema.describe('URL to image'),
   raw_ai_output: jsonStringSchema.describe('JSON string of AI output'),
+  
+  // Optional extended fields
+  user_email: z.string().email().optional().describe('User email address'),
+  user_full_name: z.string().optional().describe('Full name of the user'),
+  user_log: z.string().optional().describe('User-provided log or notes'),
+  raw_user_log: z.string().optional().describe('Raw unprocessed user log'),
+  is_logged: z.string().optional().describe('Whether scan has been logged (yes/no/true/false)'),
+  edit_category: z.string().optional().describe('Category for edits/corrections'),
+  ai_output_log: z.string().optional().describe('Alternative AI output log format'),
 });
 
 export type CsvRow = z.infer<typeof CsvRowSchema>;

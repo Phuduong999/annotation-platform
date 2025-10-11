@@ -33,19 +33,33 @@ export function Import() {
 
   // Upload mutation
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => importService.uploadCSV(file, 'current-user'),
-    onSuccess: (data) => {
+    mutationFn: (file: File) => importService.uploadFile(file, 'current-user'),
+    onSuccess: async (data) => {
       setUploadResult(data);
       notifications.show({
         title: 'Upload Successful',
         message: `Processed ${data.totalRows} rows: ${data.validRows} valid, ${data.invalidRows} invalid`,
         color: data.invalidRows > 0 ? 'yellow' : 'green',
       });
+
+      // Auto-create tasks from valid import rows
+      if (data.validRows > 0) {
+        try {
+          await importService.createTasksFromJob(data.jobId);
+          notifications.show({
+            title: 'Tasks Created',
+            message: `Tasks are being created from ${data.validRows} valid rows`,
+            color: 'blue',
+          });
+        } catch (error) {
+          console.error('Failed to create tasks:', error);
+        }
+      }
     },
     onError: (error: any) => {
       notifications.show({
         title: 'Upload Failed',
-        message: error.response?.data?.error || 'Failed to upload CSV file',
+        message: error.response?.data?.error || 'Failed to upload file',
         color: 'red',
       });
     },
@@ -100,7 +114,7 @@ export function Import() {
         <div>
           <Title order={1}>Import Data</Title>
           <Text size="sm" c="dimmed" mt="xs">
-            Upload a CSV or XLSX file to import data. Files are validated and processed in two steps:
+            Upload a CSV, XLSX, or JSON file to import data. Files are validated and processed in two steps:
             first validation and import, then task creation from valid rows with good assets.
           </Text>
         </div>
@@ -111,14 +125,14 @@ export function Import() {
             <Stack align="center" gap="md">
               <IconFileTypeCsv size={52} stroke={1.5} />
               <Text size="xl" fw={500}>
-                Upload CSV or XLSX File
+                Upload CSV, XLSX, or JSON File
               </Text>
               <Text size="sm" c="dimmed" ta="center">
-                Select a CSV or Excel file to import tasks (max 10MB)
+                Select a CSV, Excel, or JSON file to import tasks (max 10MB)
               </Text>
               <FileInput
-                placeholder="Choose CSV or XLSX file"
-                accept=".csv,.xlsx,.xls,text/csv,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                placeholder="Choose CSV, XLSX, or JSON file"
+                accept=".csv,.xlsx,.xls,.json,text/csv,application/csv,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 value={uploadedFile}
                 onChange={handleFileChange}
                 disabled={uploadMutation.isPending}
@@ -227,36 +241,30 @@ export function Import() {
           </Stack>
         )}
 
-        {/* CSV Format Guide */}
+        {/* Format Guide */}
         <Paper withBorder p="md">
           <Stack gap="sm">
             <Text size="sm" fw={500}>
-              CSV Format Requirements
+              File Format Requirements
             </Text>
             <Text size="xs" c="dimmed">
-              Your CSV file must include the following columns:
+              Your CSV/JSON file must include the following required fields:
             </Text>
             <List size="xs" spacing="xs">
               <List.Item>
-                <strong>date</strong> - Scan date in ISO-8601 format (e.g., 2025-10-09T10:00:00Z)
+                <strong>Required:</strong> date, request_id, user_id, team_id, type, user_input, raw_ai_output
               </List.Item>
               <List.Item>
-                <strong>request_id</strong> - Unique identifier for each request
+                <strong>Optional:</strong> user_email, user_full_name, user_log, raw_user_log, is_logged, edit_category, ai_output_log, reaction, feedback_category, feedback (note)
               </List.Item>
               <List.Item>
-                <strong>user_id</strong> - User who created the request
+                <strong>type</strong> must be: meal, label, front_label, screenshot, or others
               </List.Item>
               <List.Item>
-                <strong>team_id</strong> - Team identifier
+                <strong>JSON format:</strong> Array of objects with field names (case-insensitive, spaces allowed)
               </List.Item>
               <List.Item>
-                <strong>type</strong> - Scan type: <strong>meal</strong>, <strong>label</strong>, <strong>front_label</strong>, <strong>screenshot</strong>, or <strong>others</strong>
-              </List.Item>
-              <List.Item>
-                <strong>user_input</strong> - Image URL (must be valid HTTP/HTTPS URL with image extension)
-              </List.Item>
-              <List.Item>
-                <strong>raw_ai_output</strong> - AI model output as JSON string
+                <strong>Feedback fields</strong> (reaction, feedback_category, feedback) create read-only feedback events
               </List.Item>
             </List>
           </Stack>

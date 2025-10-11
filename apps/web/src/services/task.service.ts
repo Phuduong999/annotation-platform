@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Task, TaskStats, TaskFilter, TaskAnnotation } from '../types/task.types';
+import { Task, TaskStats, TaskFilter, TaskAnnotation, TaskListResponse } from '../types/task.types';
 
 // New annotation types
 export interface AnnotationRequest {
@@ -24,7 +24,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 export class TaskService {
   private apiUrl = `${API_BASE_URL}`;
 
-  async getTasks(filter?: TaskFilter): Promise<Task[]> {
+  async getTasks(filter?: TaskFilter): Promise<TaskListResponse> {
     const params = new URLSearchParams();
     
     if (filter) {
@@ -34,15 +34,36 @@ export class TaskService {
       if (filter.type) params.append('type', filter.type);
       if (filter.date_from) params.append('date_from', filter.date_from);
       if (filter.date_to) params.append('date_to', filter.date_to);
+      if (typeof filter.limit === 'number') params.append('limit', filter.limit.toString());
+      if (typeof filter.offset === 'number') params.append('offset', filter.offset.toString());
     }
 
-    const response = await axios.get(`${this.apiUrl}/tasks?${params.toString()}`);
-    // Handle new response format with pagination
+    const queryString = params.toString();
+    const response = await axios.get(queryString ? `${this.apiUrl}/tasks?${queryString}` : `${this.apiUrl}/tasks`);
+
     if (response.data.data?.tasks) {
-      return response.data.data.tasks;
+      const { tasks, pagination } = response.data.data;
+      return {
+        tasks,
+        pagination: {
+          total: pagination?.total ?? tasks.length,
+          limit: pagination?.limit ?? filter?.limit ?? tasks.length,
+          offset: pagination?.offset ?? filter?.offset ?? 0,
+          hasMore: pagination?.hasMore ?? false,
+        },
+      };
     }
-    // Fallback to old format if needed
-    return response.data.data || [];
+
+    const fallbackTasks: Task[] = response.data.data || [];
+    return {
+      tasks: fallbackTasks,
+      pagination: {
+        total: fallbackTasks.length,
+        limit: fallbackTasks.length,
+        offset: 0,
+        hasMore: false,
+      },
+    };
   }
 
   async getTask(id: string): Promise<Task> {
@@ -69,11 +90,6 @@ export class TaskService {
 
   async getUserTasks(userId: string): Promise<Task[]> {
     const response = await axios.get(`${this.apiUrl}/tasks/user/${userId}`);
-    return response.data.data;
-  }
-
-  async startTask(taskId: string): Promise<Task> {
-    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/start`);
     return response.data.data;
   }
 
@@ -131,7 +147,7 @@ export class TaskService {
   }
 
   // Auto-save draft with debouncing helper
-  private draftSaveTimeouts: Map<string, NodeJS.Timeout> = new Map();
+  private draftSaveTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   saveDraftDebounced(taskId: string, annotation: AnnotationRequest, delayMs: number = 1000): void {
     // Clear existing timeout for this task

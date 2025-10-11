@@ -7,7 +7,6 @@ import {
   validateHeaders,
   ValidationError,
   ValidationErrorCode,
-  type CsvRow,
 } from '@monorepo/shared';
 
 export interface ImportJobResult {
@@ -145,6 +144,136 @@ export class ImportService {
       };
     } catch (error) {
       // Mark job as failed
+      await this.updateImportJob(jobId, {
+        status: 'failed',
+        completedAt: new Date(),
+      });
+      throw error;
+    }
+  }
+
+  async processJSONImport(
+    records: unknown[],
+    options: { filename?: string; uploadedBy?: string } = {}
+  ): Promise<ImportJobResult> {
+    if (!Array.isArray(records)) {
+      throw new Error('Invalid payload: expected an array of records');
+    }
+
+    const filename = options.filename || 'json-import.json';
+    const uploadedBy = options.uploadedBy;
+    const jobId = await this.createImportJob(filename, uploadedBy);
+
+    let totalRows = 0;
+    let validRows = 0;
+    let invalidRows = 0;
+    const seenRequestIds = new Set<string>();
+
+    try {
+      for (let index = 0; index < records.length; index++) {
+        totalRows++;
+        const lineNumber = index + 1;
+        const record = records[index];
+
+        if (!record || typeof record !== 'object') {
+          invalidRows++;
+          await this.storeImportRow(jobId, {
+            lineNumber,
+            status: 'invalid',
+            errorCode: ValidationErrorCode.INVALID_FIELD_VALUE,
+            errorDetail: 'Record must be an object',
+            rowData: {
+              raw: typeof record === 'string' ? record : JSON.stringify(record ?? null),
+            },
+          });
+          continue;
+        }
+
+        const { normalizedRow, extras } = this.normalizeJsonRecord(record as Record<string, unknown>);
+
+        const requestId = normalizedRow.request_id?.trim();
+        if (requestId) {
+          if (seenRequestIds.has(requestId)) {
+            invalidRows++;
+            await this.storeImportRow(jobId, {
+              lineNumber,
+              status: 'invalid',
+              errorCode: ValidationErrorCode.DUPLICATE_REQUEST_ID,
+              errorDetail: `Duplicate request_id: ${requestId}`,
+              rowData: normalizedRow,
+            });
+            continue;
+          }
+
+          seenRequestIds.add(requestId);
+        }
+
+        const { errors, validRow } = validateRow(normalizedRow, lineNumber, new Set<string>());
+
+        if (errors.length > 0 || !validRow) {
+          invalidRows++;
+          const primaryError = errors[0];
+          await this.storeImportRow(jobId, {
+            lineNumber,
+            status: 'invalid',
+            errorCode: primaryError?.code || ValidationErrorCode.INVALID_FIELD_VALUE,
+            errorDetail: primaryError?.message || 'Invalid record',
+            rowData: normalizedRow,
+          });
+          continue;
+        }
+
+        const rowData: Record<string, string> = {
+          ...validRow,
+          raw_ai_output: this.stringifyJson(validRow.raw_ai_output),
+        };
+
+        if (extras.reaction) {
+          rowData.reaction = extras.reaction;
+        }
+        if (extras.feedbackCategory) {
+          rowData.feedback_category = extras.feedbackCategory;
+        }
+        if (extras.feedbackNote) {
+          rowData.feedback_note = extras.feedbackNote;
+        }
+
+        await this.storeImportRow(jobId, {
+          lineNumber,
+          status: 'valid',
+          rowData,
+        });
+        validRows++;
+
+        if (extras.reaction || extras.feedbackCategory || extras.feedbackNote) {
+          await this.insertFeedbackEventFromImport(validRow.request_id, extras, jobId, lineNumber);
+        }
+      }
+
+      let errorReportPath: string | null = null;
+      if (invalidRows > 0) {
+        errorReportPath = await this.generateErrorReport(jobId);
+      }
+
+      await this.updateImportJob(jobId, {
+        status: 'completed',
+        totalRows,
+        validRows,
+        invalidRows,
+        errorReportPath,
+        completedAt: new Date(),
+      });
+
+      return {
+        jobId,
+        filename,
+        totalRows,
+        validRows,
+        invalidRows,
+        errorReportPath,
+        status: 'completed',
+      };
+    } catch (error) {
       await this.updateImportJob(jobId, {
         status: 'failed',
         completedAt: new Date(),
@@ -357,6 +486,224 @@ export class ImportService {
         JSON.stringify(row.rowData),
       ]
     );
+  }
+
+  private normalizeJsonRecord(record: Record<string, unknown>): {
+    normalizedRow: Record<string, string>;
+    extras: {
+      reaction?: 'like' | 'dislike' | 'neutral';
+      feedbackCategory?: string;
+      feedbackNote?: string;
+    };
+  } {
+    const normalized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (typeof key !== 'string') continue;
+      const cleanKey = key.trim().toLowerCase().replace(/\s+/g, '_');
+      normalized[cleanKey] = value;
+    }
+
+    const row: Record<string, string> = {
+      date: '',
+      request_id: '',
+      user_id: '',
+      team_id: '',
+      type: '',
+      user_input: '',
+      raw_ai_output: '',
+      user_email: '',
+      user_full_name: '',
+      user_log: '',
+      raw_user_log: '',
+      is_logged: '',
+      edit_category: '',
+      ai_output_log: '',
+    };
+
+    // Date - accept multiple formats
+    const dateValue = normalized.date ?? normalized.scan_date ?? normalized.created_at;
+    if (typeof dateValue === 'string' || dateValue instanceof Date || typeof dateValue === 'number') {
+      const parsedDate = new Date(dateValue);
+      if (!Number.isNaN(parsedDate.getTime())) {
+        row.date = parsedDate.toISOString();
+      } else if (typeof dateValue === 'string') {
+        row.date = dateValue;
+      }
+    }
+
+    // Request ID
+    const requestIdValue = normalized.request_id ?? normalized.req_id;
+    if (requestIdValue !== undefined && requestIdValue !== null) {
+      row.request_id = String(requestIdValue).trim();
+    }
+
+    // User ID
+    const userIdValue = normalized.user_id ?? normalized.user;
+    if (userIdValue !== undefined && userIdValue !== null) {
+      row.user_id = String(userIdValue).trim();
+    }
+
+    // Team ID
+    const teamIdValue = normalized.team_id ?? normalized.team ?? normalized.user_current_team;
+    if (teamIdValue !== undefined && teamIdValue !== null) {
+      row.team_id = String(teamIdValue).trim();
+    }
+
+    // Type
+    const typeValue = normalized.type ?? normalized.scan_type;
+    if (typeof typeValue === 'string') {
+      row.type = typeValue.trim().toLowerCase();
+    }
+
+    // User Input (image URL)
+    const userInputValue = normalized.user_input ?? normalized.image_url ?? normalized.asset_url;
+    if (userInputValue !== undefined && userInputValue !== null) {
+      row.user_input = String(userInputValue).trim();
+    }
+
+    // Raw AI Output
+    const rawAiValue = normalized.raw_ai_output ?? normalized.ai_output ?? normalized.inference;
+    row.raw_ai_output = this.prepareRawAiOutput(rawAiValue);
+
+    // User Email
+    const userEmailValue = normalized.user_email ?? normalized.email;
+    if (userEmailValue !== undefined && userEmailValue !== null) {
+      row.user_email = String(userEmailValue).trim();
+    }
+
+    // User Full Name
+    const userFullNameValue = normalized.user_full_name ?? normalized.full_name ?? normalized.name;
+    if (userFullNameValue !== undefined && userFullNameValue !== null) {
+      row.user_full_name = String(userFullNameValue).trim();
+    }
+
+    // User Log
+    const userLogValue = normalized.user_log ?? normalized.log ?? normalized.notes;
+    if (userLogValue !== undefined && userLogValue !== null) {
+      row.user_log = String(userLogValue).trim();
+    }
+
+    // Raw User Log
+    const rawUserLogValue = normalized.raw_user_log ?? normalized.raw_log;
+    if (rawUserLogValue !== undefined && rawUserLogValue !== null) {
+      row.raw_user_log = String(rawUserLogValue).trim();
+    }
+
+    // Is Logged
+    const isLoggedValue = normalized.is_logged ?? normalized.logged;
+    if (isLoggedValue !== undefined && isLoggedValue !== null) {
+      const strValue = String(isLoggedValue).trim().toLowerCase();
+      row.is_logged = strValue === 'yes' || strValue === 'true' || strValue === '1' ? 'true' : 'false';
+    }
+
+    // Edit Category
+    const editCategoryValue = normalized.edit_category ?? normalized.category;
+    if (editCategoryValue !== undefined && editCategoryValue !== null) {
+      row.edit_category = String(editCategoryValue).trim();
+    }
+
+    // AI Output Log (alternative format)
+    const aiOutputLogValue = normalized.ai_output_log ?? normalized.output_log;
+    if (aiOutputLogValue !== undefined && aiOutputLogValue !== null) {
+      row.ai_output_log = this.prepareRawAiOutput(aiOutputLogValue);
+    }
+
+    const extras = {
+      reaction: this.normalizeReaction(normalized.reaction ?? normalized.feedback_reaction),
+      feedbackCategory: this.normalizeString(normalized.feedback_category),
+      feedbackNote: this.normalizeString(normalized.feedback_note),
+    };
+
+    return { normalizedRow: row, extras };
+  }
+
+  private prepareRawAiOutput(value: unknown): string {
+    if (value === undefined || value === null) {
+      return '';
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return '';
+      }
+
+      try {
+        const parsed = JSON.parse(trimmed);
+        return JSON.stringify(parsed);
+      } catch {
+        return trimmed;
+      }
+    }
+
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return '';
+      }
+    }
+
+    return String(value);
+  }
+
+  private stringifyJson(value: string): string {
+    try {
+      const parsed = JSON.parse(value);
+      return JSON.stringify(parsed);
+    } catch {
+      return value;
+    }
+  }
+
+  private normalizeReaction(value: unknown): 'like' | 'dislike' | 'neutral' | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'like' || normalized === 'dislike' || normalized === 'neutral') {
+      return normalized;
+    }
+
+    return undefined;
+  }
+
+  private normalizeString(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  private async insertFeedbackEventFromImport(
+    requestId: string,
+    extras: {
+      reaction?: 'like' | 'dislike' | 'neutral';
+      feedbackCategory?: string;
+      feedbackNote?: string;
+    },
+    jobId: string,
+    lineNumber: number
+  ): Promise<void> {
+    try {
+      await this.pool.query(
+        `INSERT INTO feedback_events (request_id, reaction, category, note, source, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (request_id) WHERE user_event_id IS NULL DO NOTHING`,
+        [
+          requestId,
+          extras.reaction || null,
+          extras.feedbackCategory || null,
+          extras.feedbackNote || null,
+          'import_json',
+          JSON.stringify({ import_job_id: jobId, import_line_number: lineNumber }),
+        ]
+      );
+    } catch (error) {
+      console.error('Failed to insert feedback event from import:', error);
+    }
   }
 
 

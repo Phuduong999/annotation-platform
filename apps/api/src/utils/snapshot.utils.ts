@@ -313,3 +313,530 @@ export function convertToCSV(items: any[]): string {
 export function convertToJSONL(items: any[]): string {
   return items.map(item => JSON.stringify(item)).join('\n');
 }
+
+/**
+ * Stream CSV data in chunks
+ * Returns an async generator that yields CSV rows in batches
+ */
+export async function* streamCSV(
+  pool: Pool,
+  snapshotId: string,
+  split?: string,
+  batchSize: number = 1000
+): AsyncGenerator<string, void, unknown> {
+  const client = await pool.connect();
+  try {
+    // Build query
+    let query = `
+      SELECT data, split, split_index 
+      FROM snapshot_items 
+      WHERE snapshot_id = $1
+    `;
+    const params: any[] = [snapshotId];
+    
+    if (split && split !== 'all') {
+      query += ` AND split = $2`;
+      params.push(split);
+    }
+    
+    query += ` ORDER BY split, split_index`;
+    
+    // Use cursor for streaming
+    const cursorName = `snapshot_cursor_${Date.now()}`;
+    await client.query('BEGIN');
+    await client.query(`DECLARE ${cursorName} CURSOR FOR ${query}`, params);
+    
+    let firstBatch = true;
+    let headers: string[] = [];
+    
+    while (true) {
+      const result = await client.query(
+        `FETCH ${batchSize} FROM ${cursorName}`
+      );
+      
+      if (result.rows.length === 0) break;
+      
+      const items = result.rows.map(row => ({
+        ...row.data,
+        split: row.split,
+      }));
+      
+      // Generate CSV for this batch
+      if (firstBatch) {
+        headers = Object.keys(items[0]);
+        yield headers.join(',') + '\n';
+        firstBatch = false;
+      }
+      
+      // Convert items to CSV rows
+      const csvRows = items.map(item => {
+        return headers.map(header => {
+          const value = item[header];
+          if (value === null || value === undefined) {
+            return '';
+          } else if (typeof value === 'object') {
+            return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
+          } else if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
+        }).join(',');
+      }).join('\n');
+      
+      yield csvRows + '\n';
+    }
+    
+    await client.query(`CLOSE ${cursorName}`);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Stream JSONL data in chunks
+ * Returns an async generator that yields JSONL lines in batches
+ */
+export async function* streamJSONL(
+  pool: Pool,
+  snapshotId: string,
+  split?: string,
+  batchSize: number = 1000
+): AsyncGenerator<string, void, unknown> {
+  const client = await pool.connect();
+  try {
+    // Build query
+    let query = `
+      SELECT data, split, split_index 
+      FROM snapshot_items 
+      WHERE snapshot_id = $1
+    `;
+    const params: any[] = [snapshotId];
+    
+    if (split && split !== 'all') {
+      query += ` AND split = $2`;
+      params.push(split);
+    }
+    
+    query += ` ORDER BY split, split_index`;
+    
+    // Use cursor for streaming
+    const cursorName = `snapshot_cursor_${Date.now()}`;
+    await client.query('BEGIN');
+    await client.query(`DECLARE ${cursorName} CURSOR FOR ${query}`, params);
+    
+    while (true) {
+      const result = await client.query(
+        `FETCH ${batchSize} FROM ${cursorName}`
+      );
+      
+      if (result.rows.length === 0) break;
+      
+      const items = result.rows.map(row => ({
+        ...row.data,
+        split: row.split,
+      }));
+      
+      // Convert to JSONL
+      const jsonlChunk = items.map(item => JSON.stringify(item)).join('\n') + '\n';
+      yield jsonlChunk;
+    }
+    
+    await client.query(`CLOSE ${cursorName}`);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Calculate streaming checksum for large datasets
+ */
+export async function calculateStreamingChecksum(
+  pool: Pool,
+  snapshotId: string,
+  split?: string
+): Promise<string> {
+  const hash = crypto.createHash('sha256');
+  const client = await pool.connect();
+  
+  try {
+    let query = `
+      SELECT item_checksum
+      FROM snapshot_items 
+      WHERE snapshot_id = $1
+    `;
+    const params: any[] = [snapshotId];
+    
+    if (split && split !== 'all') {
+      query += ` AND split = $2`;
+      params.push(split);
+    }
+    
+    query += ` ORDER BY split, split_index`;
+    
+    // Stream checksums
+    const cursorName = `checksum_cursor_${Date.now()}`;
+    await client.query('BEGIN');
+    await client.query(`DECLARE ${cursorName} CURSOR FOR ${query}`, params);
+    
+    while (true) {
+      const result = await client.query(`FETCH 1000 FROM ${cursorName}`);
+      if (result.rows.length === 0) break;
+      
+      result.rows.forEach(row => {
+        hash.update(row.item_checksum);
+      });
+    }
+    
+    await client.query(`CLOSE ${cursorName}`);
+    await client.query('COMMIT');
+    
+    return hash.digest('hex');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Generate enhanced manifest with full ontology, schema, and lineage
+ */
+export async function generateEnhancedManifest(
+  pool: Pool,
+  snapshot: any,
+  ontologyConfig?: any
+): Promise<any> {
+  // Get statistics from database
+  const statsResult = await pool.query(
+    `SELECT em.statistics, em.ontology 
+     FROM export_manifests em 
+     WHERE em.snapshot_id = $1`,
+    [snapshot.id]
+  );
+  
+  const existingStats = statsResult.rows[0]?.statistics || {};
+  const existingOntology = statsResult.rows[0]?.ontology || {};
+  
+  // Merge with provided config
+  const classifications = ontologyConfig?.classifications || 
+                         existingOntology.classifications || 
+                         ['meal', 'label', 'front_label', 'screenshot', 'others', 'safe'];
+  
+  // Build comprehensive ontology
+  const ontology = {
+    version: '1.0.0',
+    classifications,
+    tags: ontologyConfig?.tags || existingOntology.tags || [],
+    fields: [
+      {
+        name: 'id',
+        type: 'string',
+        description: 'Unique task identifier',
+        required: true,
+        format: 'uuid',
+      },
+      {
+        name: 'classification',
+        type: 'string',
+        description: 'Task classification category',
+        required: true,
+        enum_values: classifications,
+      },
+      {
+        name: 'tags',
+        type: 'array',
+        description: 'Additional tags for categorization',
+        required: false,
+        items: { type: 'string' },
+      },
+      {
+        name: 'confidence',
+        type: 'number',
+        description: 'AI confidence score',
+        required: false,
+        minimum: 0,
+        maximum: 1,
+      },
+      {
+        name: 'split',
+        type: 'string',
+        description: 'Dataset split assignment',
+        required: true,
+        enum_values: ['train', 'validation', 'test'],
+      },
+      {
+        name: 'request_id',
+        type: 'string',
+        description: 'Original request identifier',
+        required: false,
+      },
+      {
+        name: 'team_id',
+        type: 'string',
+        description: 'Team identifier',
+        required: false,
+      },
+    ],
+    relationships: [
+      {
+        source: 'task',
+        target: 'request',
+        type: 'belongs_to',
+        foreign_key: 'request_id',
+      },
+      {
+        source: 'task',
+        target: 'team',
+        type: 'belongs_to',
+        foreign_key: 'team_id',
+      },
+    ],
+  };
+  
+  // Build JSON Schema
+  const schema = {
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    $id: `https://example.com/schemas/snapshot/${snapshot.version_id}.json`,
+    title: snapshot.name,
+    description: snapshot.description || 'Snapshot dataset',
+    type: 'object',
+    properties: {
+      id: { 
+        type: 'string', 
+        format: 'uuid',
+        description: 'Unique task identifier',
+      },
+      classification: { 
+        type: 'string',
+        enum: classifications,
+        description: 'Task classification category',
+      },
+      tags: { 
+        type: 'array', 
+        items: { type: 'string' },
+        description: 'Additional tags',
+      },
+      confidence: { 
+        type: 'number', 
+        minimum: 0, 
+        maximum: 1,
+        description: 'AI confidence score',
+      },
+      split: { 
+        type: 'string', 
+        enum: ['train', 'validation', 'test'],
+        description: 'Dataset split',
+      },
+      request_id: { 
+        type: 'string',
+        description: 'Request identifier',
+      },
+      team_id: { 
+        type: 'string',
+        description: 'Team identifier',
+      },
+      scan_date: {
+        type: 'string',
+        format: 'date-time',
+        description: 'Scan timestamp',
+      },
+      user_input: {
+        type: 'object',
+        description: 'Original user input data',
+      },
+    },
+    required: ['id', 'classification', 'split'],
+    additionalProperties: false,
+  };
+  
+  // Build detailed lineage
+  const lineage = {
+    snapshot_id: snapshot.id,
+    version_id: snapshot.version_id,
+    parent_snapshot_id: snapshot.parent_snapshot_id,
+    source_systems: ['annotation_platform'],
+    data_sources: [
+      {
+        type: 'database',
+        name: 'tasks',
+        query: 'SELECT * FROM tasks WHERE status = \'completed\' AND review_status = \'accepted\'',
+        timestamp: snapshot.created_at,
+      },
+    ],
+    processing_steps: [
+      {
+        name: 'data_extraction',
+        description: 'Extract finalized tasks from database',
+        timestamp: snapshot.created_at,
+        version: '1.0.0',
+        parameters: {
+          filter_criteria: snapshot.filter_criteria,
+        },
+      },
+      {
+        name: 'quality_validation',
+        description: 'Validate data quality and completeness',
+        timestamp: snapshot.created_at,
+        version: '1.0.0',
+      },
+      {
+        name: 'stratified_splitting',
+        description: 'Assign train/validation/test splits',
+        timestamp: snapshot.created_at,
+        version: '1.0.0',
+        algorithm: 'deterministic_stratified_split',
+        parameters: {
+          split_seed: snapshot.split_seed,
+          train_ratio: snapshot.train_ratio,
+          validation_ratio: snapshot.validation_ratio,
+          test_ratio: snapshot.test_ratio,
+          stratify_by: snapshot.stratify_by,
+        },
+      },
+      {
+        name: 'snapshot_creation',
+        description: 'Create immutable snapshot',
+        timestamp: snapshot.created_at,
+        version: '1.0.0',
+        parameters: {
+          immutable: true,
+          checksum_algorithm: 'sha256',
+        },
+      },
+    ],
+    transformations: [
+      'normalization',
+      'validation',
+      'stratified_splitting',
+      'checksum_generation',
+    ],
+    filters_applied: snapshot.filter_criteria ? [snapshot.filter_criteria] : [],
+    quality_checks: [
+      {
+        name: 'completeness_check',
+        passed: true,
+        timestamp: snapshot.created_at,
+      },
+      {
+        name: 'consistency_check',
+        passed: true,
+        timestamp: snapshot.created_at,
+      },
+    ],
+  };
+  
+  // Calculate checksums
+  const manifestWithoutChecksum = {
+    version: snapshot.version_id,
+    schema_version: '2.0.0',
+    dataset_name: snapshot.name,
+    dataset_description: snapshot.description,
+    created_at: snapshot.created_at,
+    created_by: snapshot.created_by,
+    ontology,
+    schema,
+    statistics: existingStats,
+    lineage,
+    split_config: {
+      seed: snapshot.split_seed,
+      ratios: {
+        train: snapshot.train_ratio,
+        validation: snapshot.validation_ratio,
+        test: snapshot.test_ratio,
+      },
+      stratify_by: snapshot.stratify_by,
+      reproducible: true,
+    },
+  };
+  
+  const manifestChecksum = generateChecksum(JSON.stringify(manifestWithoutChecksum));
+  const ontologyChecksum = generateChecksum(JSON.stringify(ontology));
+  const schemaChecksum = generateChecksum(JSON.stringify(schema));
+  const lineageChecksum = generateChecksum(JSON.stringify(lineage));
+  
+  return {
+    ...manifestWithoutChecksum,
+    checksums: {
+      manifest: manifestChecksum,
+      ontology: ontologyChecksum,
+      schema: schemaChecksum,
+      lineage: lineageChecksum,
+      data: snapshot.data_checksum,
+    },
+    immutable: true,
+    published: snapshot.is_published,
+  };
+}
+
+/**
+ * Verify split reproducibility
+ */
+export async function verifySplitReproducibility(
+  pool: Pool,
+  snapshotId: string,
+  seed: number
+): Promise<{ reproducible: boolean; mismatches: number; details?: any[] }> {
+  // Get snapshot configuration
+  const snapshotResult = await pool.query(
+    `SELECT * FROM snapshots WHERE id = $1`,
+    [snapshotId]
+  );
+  
+  if (snapshotResult.rows.length === 0) {
+    throw new Error('Snapshot not found');
+  }
+  
+  const snapshot = snapshotResult.rows[0];
+  
+  // Get all items with their current splits
+  const itemsResult = await pool.query(
+    `SELECT si.task_id, si.split as current_split, si.data
+     FROM snapshot_items si
+     WHERE si.snapshot_id = $1
+     ORDER BY si.task_id`,
+    [snapshotId]
+  );
+  
+  const items = itemsResult.rows.map(row => ({
+    id: row.task_id,
+    ...row.data,
+    current_split: row.current_split,
+  }));
+  
+  // Recalculate splits with the given seed
+  const recalculatedSplits = stratifiedSplit(
+    items,
+    snapshot.stratify_by,
+    seed,
+    snapshot.train_ratio,
+    snapshot.validation_ratio
+  );
+  
+  // Compare splits
+  const mismatches: any[] = [];
+  items.forEach(item => {
+    const recalculatedSplit = recalculatedSplits.get(item.id)?.split;
+    if (recalculatedSplit !== item.current_split) {
+      mismatches.push({
+        task_id: item.id,
+        expected_split: item.current_split,
+        recalculated_split: recalculatedSplit,
+      });
+    }
+  });
+  
+  return {
+    reproducible: mismatches.length === 0,
+    mismatches: mismatches.length,
+    details: mismatches.length > 0 ? mismatches.slice(0, 10) : undefined,
+  };
+}

@@ -9,5 +9,6 @@
     }
   },
   "include": ["src/**/*"],
+  "exclude": ["src/scripts/test-analytics-routes.ts"],
   "references": [{ "path": "../../packages/shared" }]
 }

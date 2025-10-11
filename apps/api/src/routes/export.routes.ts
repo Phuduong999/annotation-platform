@@ -8,6 +8,11 @@ import {
   generateManifest,
   convertToCSV,
   convertToJSONL,
+  streamCSV,
+  streamJSONL,
+  calculateStreamingChecksum,
+  generateEnhancedManifest,
+  verifySplitReproducibility,
 } from '../utils/snapshot.utils.js';
 
 export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
@@ -545,6 +550,347 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
         return reply.code(200).send({
           success: true,
           data: result.rows[0],
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
+  // GET /exports/stream - Stream export data (for large datasets)
+  fastify.get(
+    '/exports/stream',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          required: ['snapshot'],
+          properties: {
+            snapshot: { type: 'string' },
+            format: { type: 'string', enum: ['csv', 'jsonl'] },
+            split: { type: 'string', enum: ['train', 'validation', 'test', 'all'] },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Querystring: {
+          snapshot: string;
+          format?: 'csv' | 'jsonl';
+          split?: 'train' | 'validation' | 'test' | 'all';
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { snapshot, format = 'jsonl', split = 'all' } = request.query;
+
+        // Get snapshot
+        const snapshotResult = await pool.query(
+          `SELECT * FROM snapshots WHERE version_id = $1 OR id = $1`,
+          [snapshot]
+        );
+
+        if (snapshotResult.rows.length === 0) {
+          return reply.code(404).send({
+            success: false,
+            error: 'Snapshot not found',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const snapshotData = snapshotResult.rows[0];
+
+        // Calculate checksum for this export
+        const exportChecksum = await calculateStreamingChecksum(
+          pool,
+          snapshotData.id,
+          split !== 'all' ? split : undefined
+        );
+
+        // Set response headers
+        const contentType = format === 'csv' ? 'text/csv' : 'application/x-ndjson';
+        const filename = `${snapshotData.version_id}-${split}.${format}`;
+
+        reply.header('Content-Type', contentType);
+        reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+        reply.header('X-Checksum', exportChecksum);
+        reply.header('X-Version', snapshotData.version_id);
+        reply.header('ETag', `"${exportChecksum}"`);
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        reply.header('X-Snapshot-Immutable', 'true');
+        reply.header('X-Split-Seed', snapshotData.split_seed.toString());
+
+        // Record export (async, don't wait)
+        pool.query(
+          `INSERT INTO exports 
+           (snapshot_id, format, split, file_checksum, status, created_by)
+           VALUES ($1, $2, $3, $4, 'completed', 'system')`,
+          [
+            snapshotData.id,
+            format,
+            split === 'all' ? null : split,
+            exportChecksum,
+          ]
+        ).catch(err => fastify.log.error('Failed to record export:', err));
+
+        // Stream data
+        const stream = format === 'csv' 
+          ? streamCSV(pool, snapshotData.id, split !== 'all' ? split : undefined)
+          : streamJSONL(pool, snapshotData.id, split !== 'all' ? split : undefined);
+
+        // Set up streaming response
+        reply.raw.writeHead(200);
+        
+        for await (const chunk of stream) {
+          if (!reply.raw.write(chunk)) {
+            // Backpressure - wait for drain
+            await new Promise(resolve => reply.raw.once('drain', resolve));
+          }
+        }
+        
+        reply.raw.end();
+      } catch (error) {
+        fastify.log.error(error);
+        if (!reply.raw.headersSent) {
+          return reply.code(500).send({
+            success: false,
+            error: error instanceof Error ? error.message : 'Internal server error',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }
+  );
+
+  // GET /exports/manifest/:snapshotId/enhanced - Get enhanced manifest
+  fastify.get(
+    '/exports/manifest/:snapshotId/enhanced',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['snapshotId'],
+          properties: {
+            snapshotId: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: {
+          snapshotId: string;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { snapshotId } = request.params;
+
+        const snapshotResult = await pool.query(
+          `SELECT * FROM snapshots WHERE id = $1 OR version_id = $1`,
+          [snapshotId]
+        );
+
+        if (snapshotResult.rows.length === 0) {
+          return reply.code(404).send({
+            success: false,
+            error: 'Snapshot not found',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const snapshot = snapshotResult.rows[0];
+        const manifest = await generateEnhancedManifest(pool, snapshot);
+
+        reply.header('Content-Type', 'application/json');
+        reply.header('Content-Disposition', `attachment; filename="${snapshot.version_id}-manifest.json"`);
+        reply.header('ETag', `"${manifest.checksums.manifest}"`);
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        reply.header('X-Schema-Version', manifest.schema_version);
+        reply.header('X-Ontology-Checksum', manifest.checksums.ontology);
+        reply.header('X-Schema-Checksum', manifest.checksums.schema);
+        reply.header('X-Lineage-Checksum', manifest.checksums.lineage);
+
+        return reply.send(manifest);
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
+  // POST /snapshots/:id/verify-split - Verify split reproducibility
+  fastify.post(
+    '/snapshots/:id/verify-split',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+        body: {
+          type: 'object',
+          properties: {
+            seed: { type: 'number' },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: {
+          id: string;
+        };
+        Body: {
+          seed?: number;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { id } = request.params;
+        
+        // Get snapshot
+        const snapshotResult = await pool.query(
+          `SELECT * FROM snapshots WHERE id = $1 OR version_id = $1`,
+          [id]
+        );
+
+        if (snapshotResult.rows.length === 0) {
+          return reply.code(404).send({
+            success: false,
+            error: 'Snapshot not found',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const snapshot = snapshotResult.rows[0];
+        const seedToVerify = request.body?.seed ?? snapshot.split_seed;
+
+        // Verify reproducibility
+        const verification = await verifySplitReproducibility(
+          pool,
+          snapshot.id,
+          seedToVerify
+        );
+
+        return reply.code(200).send({
+          success: true,
+          data: {
+            snapshot_id: snapshot.id,
+            version_id: snapshot.version_id,
+            original_seed: snapshot.split_seed,
+            verification_seed: seedToVerify,
+            ...verification,
+            message: verification.reproducible
+              ? 'Split is reproducible with the given seed'
+              : `Split is not reproducible - ${verification.mismatches} mismatches found`,
+          },
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
+  // GET /snapshots/:id/split-info - Get split configuration and statistics
+  fastify.get(
+    '/snapshots/:id/split-info',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string' },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: {
+          id: string;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const { id } = request.params;
+
+        const snapshotResult = await pool.query(
+          `SELECT s.*, 
+                  COUNT(si.id) as total_items,
+                  COUNT(CASE WHEN si.split = 'train' THEN 1 END) as train_count,
+                  COUNT(CASE WHEN si.split = 'validation' THEN 1 END) as validation_count,
+                  COUNT(CASE WHEN si.split = 'test' THEN 1 END) as test_count
+           FROM snapshots s
+           LEFT JOIN snapshot_items si ON si.snapshot_id = s.id
+           WHERE s.id = $1 OR s.version_id = $1
+           GROUP BY s.id`,
+          [id]
+        );
+
+        if (snapshotResult.rows.length === 0) {
+          return reply.code(404).send({
+            success: false,
+            error: 'Snapshot not found',
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        const snapshot = snapshotResult.rows[0];
+
+        return reply.code(200).send({
+          success: true,
+          data: {
+            snapshot_id: snapshot.id,
+            version_id: snapshot.version_id,
+            split_config: {
+              seed: snapshot.split_seed,
+              ratios: {
+                train: snapshot.train_ratio,
+                validation: snapshot.validation_ratio,
+                test: snapshot.test_ratio,
+              },
+              stratify_by: snapshot.stratify_by,
+              reproducible: true,
+              immutable: true,
+            },
+            actual_counts: {
+              total: parseInt(snapshot.total_items),
+              train: parseInt(snapshot.train_count),
+              validation: parseInt(snapshot.validation_count),
+              test: parseInt(snapshot.test_count),
+            },
+            actual_ratios: {
+              train: snapshot.total_items > 0 ? snapshot.train_count / snapshot.total_items : 0,
+              validation: snapshot.total_items > 0 ? snapshot.validation_count / snapshot.total_items : 0,
+              test: snapshot.total_items > 0 ? snapshot.test_count / snapshot.total_items : 0,
+            },
+          },
           timestamp: new Date().toISOString(),
         });
       } catch (error) {

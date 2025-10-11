@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import '@fastify/multipart';
 import { Pool } from 'pg';
 import { ImportService } from '../services/import.service.js';
 
@@ -10,7 +11,18 @@ export async function importRoutes(fastify: FastifyInstance, pool: Pool) {
     '/import/jobs',
     {
       schema: {
-        consumes: ['multipart/form-data'],
+        consumes: ['multipart/form-data', 'application/json'],
+        body: {
+          // Allow flexible JSON body for import
+          // Validation happens in normalizeJsonRecord after field name normalization
+          oneOf: [
+            {
+              type: 'array',
+              items: { type: 'object' }, // Accept any object, validation in service layer
+            },
+            { type: 'object' }, // For multipart/form-data
+          ],
+        },
         response: {
           200: {
             type: 'object',
@@ -34,49 +46,87 @@ export async function importRoutes(fastify: FastifyInstance, pool: Pool) {
         },
       },
     },
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
       try {
-        const data = await request.file();
+        const contentType = request.headers['content-type'] || '';
+        const uploadedBy = request.headers['x-user-id'] as string | undefined;
 
-        if (!data) {
-          return reply.code(400).send({
-            success: false,
-            error: 'No file uploaded',
+        if (typeof request.isMultipart === 'function' && request.isMultipart()) {
+          const data = await request.file();
+
+          if (!data) {
+            return reply.code(400).send({
+              success: false,
+              error: 'No file uploaded',
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          // Check file type
+          const isXLSX =
+            data.filename.endsWith('.xlsx') ||
+            data.filename.endsWith('.xls') ||
+            data.mimetype.includes('spreadsheet') ||
+            data.mimetype.includes('excel');
+
+          const isCSV =
+            data.filename.endsWith('.csv') ||
+            data.mimetype.includes('csv') ||
+            data.mimetype.includes('text');
+
+          if (!isCSV && !isXLSX) {
+            return reply.code(400).send({
+              success: false,
+              error: 'Invalid file type. Please upload a CSV or XLSX file',
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          // Process CSV/XLSX import
+          const result = await importService.processCSVImport(
+            data.file,
+            data.filename,
+            uploadedBy,
+            isXLSX
+          );
+
+          return reply.code(200).send({
+            success: true,
+            data: result,
             timestamp: new Date().toISOString(),
           });
         }
 
-        // Check file type
-        const isXLSX = 
-          data.filename.endsWith('.xlsx') || 
-          data.filename.endsWith('.xls') ||
-          data.mimetype.includes('spreadsheet') ||
-          data.mimetype.includes('excel');
+        if (contentType.includes('application/json')) {
+          const payload = request.body;
 
-        const isCSV = 
-          data.filename.endsWith('.csv') ||
-          data.mimetype.includes('csv') ||
-          data.mimetype.includes('text');
+          if (!Array.isArray(payload) || payload.length === 0) {
+            return reply.code(400).send({
+              success: false,
+              error: 'Request body must be a non-empty array of records',
+              timestamp: new Date().toISOString(),
+            });
+          }
 
-        if (!isCSV && !isXLSX) {
-          return reply.code(400).send({
-            success: false,
-            error: 'Invalid file type. Please upload a CSV or XLSX file',
+          const filename =
+            (request.headers['x-import-filename'] as string | undefined)?.trim() ||
+            'json-import.json';
+
+          const result = await importService.processJSONImport(payload, {
+            filename,
+            uploadedBy,
+          });
+
+          return reply.code(200).send({
+            success: true,
+            data: result,
             timestamp: new Date().toISOString(),
           });
         }
 
-        // Process CSV/XLSX import
-        const result = await importService.processCSVImport(
-          data.file,
-          data.filename,
-          request.headers['x-user-id'] as string | undefined,
-          isXLSX
-        );
-
-        return reply.code(200).send({
-          success: true,
-          data: result,
+        return reply.code(400).send({
+          success: false,
+          error: 'Unsupported content type. Use multipart/form-data or application/json',
           timestamp: new Date().toISOString(),
         });
       } catch (error) {

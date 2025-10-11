@@ -22,6 +22,7 @@ import {
   ActionIcon,
   Tooltip,
   Paper,
+  Modal,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
@@ -36,6 +37,7 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconX,
+  IconZoomIn,
 } from '@tabler/icons-react';
 import { taskService } from '../services/task.service';
 import { TaskAnnotation, ParsedAIOutput } from '../types/task.types';
@@ -47,6 +49,7 @@ export function TaskDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [imageError, setImageError] = useState(false);
+  const [imageModalOpened, setImageModalOpened] = useState(false);
 
   // Fetch task data
   const { data: task, isLoading } = useQuery({
@@ -364,7 +367,18 @@ export function TaskDetail() {
           <Grid.Col span={4}>
             <Card h="100%" withBorder p="md">
               <Stack h="100%">
-                <Title order={4}>Image</Title>
+                <Group justify="space-between">
+                  <Title order={4}>Image</Title>
+                  <Tooltip label="View full-screen">
+                    <ActionIcon
+                      variant="subtle"
+                      onClick={() => setImageModalOpened(true)}
+                      disabled={imageError}
+                    >
+                      <IconZoomIn size={18} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
                 <Divider />
                 <ScrollArea h="100%" type="auto">
                   {imageError ? (
@@ -378,6 +392,8 @@ export function TaskDetail() {
                       fit="contain"
                       onError={() => setImageError(true)}
                       radius="md"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setImageModalOpened(true)}
                     />
                   )}
                   <Stack gap="xs" mt="md">
@@ -390,6 +406,22 @@ export function TaskDetail() {
               </Stack>
             </Card>
           </Grid.Col>
+
+          {/* Image Full-Screen Modal */}
+          <Modal
+            opened={imageModalOpened}
+            onClose={() => setImageModalOpened(false)}
+            size="xl"
+            title="Full-Screen Image"
+            centered
+          >
+            <Image
+              src={task?.user_input}
+              alt="Task image full-screen"
+              fit="contain"
+              radius="md"
+            />
+          </Modal>
 
           {/* Middle Panel - AI Output */}
           <Grid.Col span={4}>

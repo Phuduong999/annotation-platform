@@ -68,6 +68,9 @@ importers:
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^20.11.5
@@ -120,9 +123,6 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
-      mantine-datatable:
-        specifier: ^7.17.1
-        version: 7.17.1(@mantine/core@8.3.3(@mantine/hooks@8.3.3(react@18.3.1))(@types/react@18.3.26)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@mantine/hooks@8.3.3(react@18.3.1))(clsx@2.1.1)(react@18.3.1)
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -1912,14 +1912,6 @@ packages:
 
   magic-string@0.30.19:
     resolution: {integrity: sha512-2N21sPY9Ws53PZvsEpVtNuSW+ScYbQdp4b9qUaL+9QkHUrGFKo56Lg9Emg5s9V/qrtNBmiR01sYhUOwu3H+VOw==}
-
-  mantine-datatable@7.17.1:
-    resolution: {integrity: sha512-5GBpSTZyvVGqe2TqEaBYrZQyQjLgHuMqkb2wry+wPvwalRY0oFKG1kdFd43bxch9FOG0K0CREEa6+cYIDby55Q==}
-    peerDependencies:
-      '@mantine/core': '>=7.14'
-      '@mantine/hooks': '>=7.14'
-      clsx: '>=2'
-      react: '>=18.2'
 
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
@@ -4299,13 +4291,6 @@ snapshots:
   magic-string@0.30.19:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  mantine-datatable@7.17.1(@mantine/core@8.3.3(@mantine/hooks@8.3.3(react@18.3.1))(@types/react@18.3.26)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(@mantine/hooks@8.3.3(react@18.3.1))(clsx@2.1.1)(react@18.3.1):
-    dependencies:
-      '@mantine/core': 8.3.3(@mantine/hooks@8.3.3(react@18.3.1))(@types/react@18.3.26)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@mantine/hooks': 8.3.3(react@18.3.1)
-      clsx: 2.1.1
-      react: 18.3.1
 
   math-intrinsics@1.1.0: {}
 

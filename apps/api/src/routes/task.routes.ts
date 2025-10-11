@@ -190,6 +190,8 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
           required: ['jobId'],
           properties: {
             jobId: { type: 'string' },
+            skipLinkCheck: { type: 'boolean' },
+            assignTo: { type: 'string' },
           },
         },
       },
@@ -198,14 +200,19 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
       request: FastifyRequest<{
         Body: {
           jobId: string;
+          skipLinkCheck?: boolean;
+          assignTo?: string;
         };
       }>,
       reply: FastifyReply
     ) => {
       try {
-        const { jobId } = request.body;
+        const { jobId, skipLinkCheck, assignTo } = request.body;
 
-        const result = await taskService.createTasksFromImportJob(jobId);
+        const result = await taskService.createTasksFromImportJob(jobId, {
+          skipLinkCheck: skipLinkCheck || false,
+          assignTo: assignTo || undefined,
+        });
 
         return reply.code(200).send({
           success: true,
