@@ -11,6 +11,7 @@ import {
   Group,
   Button,
   Select,
+  MultiSelect,
   Textarea,
   Alert,
   Badge,
@@ -93,7 +94,7 @@ export function TaskDetail() {
       classification: 'others' as TaskAnnotation['classification'],
       nutrition: parsedAI.nutrition,
       result_return_judgement: isEmptyAIOutput ? 'no_result_return' : 'result_return',
-      feedback_correction: undefined,
+      feedback_correction: [],
     },
     validate: {
       classification: (value) => {
@@ -341,11 +342,7 @@ export function TaskDetail() {
     handleSkip();
   });
 
-  useHotkeys('1', () => form.setFieldValue('classification', 'meal'));
-  useHotkeys('2', () => form.setFieldValue('classification', 'label'));
-  useHotkeys('3', () => form.setFieldValue('classification', 'front_label'));
-  useHotkeys('4', () => form.setFieldValue('classification', 'screenshot'));
-  useHotkeys('5', () => form.setFieldValue('classification', 'others'));
+  // Removed hotkeys for classification numbers since labels no longer show numbers
 
   if (isLoading) {
     return (
@@ -386,7 +383,7 @@ export function TaskDetail() {
             </Group>
             <Group>
               <Text size="xs" c="dimmed">
-                Hotkeys: 1-5 (classification) • ⌘+S (save) • ⌘+Enter (submit) • ⌘+Shift+S (skip)
+                Hotkeys: ⌘+S (save) • ⌘+Enter (submit) • ⌘+Shift+S (skip)
               </Text>
             </Group>
           </Group>
@@ -489,7 +486,7 @@ export function TaskDetail() {
                 <ScrollArea h="100%" type="auto">
                   <Stack gap="sm">
                     {task?.raw_ai_output ? (
-                      <Code block style={{ fontSize: '11px', maxHeight: '100%', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                      <Code block style={{ fontSize: '11px', whiteSpace: 'pre-wrap' }}>
                         {typeof task.raw_ai_output === 'string' 
                           ? task.raw_ai_output 
                           : JSON.stringify(task.raw_ai_output, null, 2)}
@@ -537,11 +534,11 @@ export function TaskDetail() {
                             label="Classification"
                             placeholder="Select classification"
                             data={[
-                              { value: 'meal', label: 'Meal (1)' },
-                              { value: 'label', label: 'Label (2)' },
-                              { value: 'front_label', label: 'Front Label (3)' },
-                              { value: 'screenshot', label: 'Screenshot (4)' },
-                              { value: 'others', label: 'Others (5)' },
+                              { value: 'meal', label: 'Meal' },
+                              { value: 'label', label: 'Label' },
+                              { value: 'front_label', label: 'Front Label' },
+                              { value: 'screenshot', label: 'Screenshot' },
+                              { value: 'others', label: 'Others' },
                             ]}
                             {...form.getInputProps('classification')}
                             required
@@ -573,21 +570,21 @@ export function TaskDetail() {
                           </Tooltip>
                           {isEmptyAIOutput && (
                             <Text size="xs" c="dimmed" fs="italic">
-                              Auto-set: Empty AI output detected
+                              <Text component="span" fw={700}>Auto-set:</Text> Empty AI output detected
                             </Text>
                           )}
                         </Stack>
 
-                        {/* Feedback Correction */}
+                        {/* Feedback Correction - Multiple Selection */}
                         <Tooltip 
-                          label="Evaluate end-user feedback accuracy if feedback exists"
+                          label="Evaluate end-user feedback accuracy. Can select multiple issues if feedback exists."
                           multiline
-                          w={280}
+                          w={300}
                           position="top"
                         >
-                          <Select
+                          <MultiSelect
                             label="Feedback Correction"
-                            placeholder="Evaluate feedback (if exists)"
+                            placeholder="Select all that apply"
                             data={[
                               { value: 'correct_feedback', label: 'Correct Feedback' },
                               { value: 'wrong_food', label: 'Wrong Food' },
@@ -599,6 +596,7 @@ export function TaskDetail() {
                             {...form.getInputProps('feedback_correction')}
                             error={form.errors.feedback_correction}
                             clearable
+                            searchable
                           />
                         </Tooltip>
 
@@ -619,8 +617,15 @@ export function TaskDetail() {
                             <Text size="xs">
                               Type: <Text component="span" fw={700} tt="uppercase">{task.type}</Text>
                             </Text>
-                            <Text size="xs">Confidence: {(task.ai_confidence * 100).toFixed(1)}%</Text>
-                            <Text size="xs">Date: {new Date(task.scan_date).toLocaleString()}</Text>
+                            <Text size="xs">
+                              Scanned: {new Date(task.scan_date).toLocaleDateString('en-US', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </Text>
                           </Stack>
                         </Paper>
                       </Stack>

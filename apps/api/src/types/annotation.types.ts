@@ -15,7 +15,7 @@ export type FeedbackCorrection = 'wrong_food' | 'incorrect_nutrition' | 'incorre
 export interface AnnotationRequest {
   scan_type: ScanType;
   result_return: ResultReturn;
-  feedback_correction?: FeedbackCorrection;
+  feedback_correction?: FeedbackCorrection[];  // Array for multiple selections
   note?: string;
   draft?: boolean;
 }
@@ -106,8 +106,15 @@ export function validateAnnotation(annotation: AnnotationRequest): string[] {
     errors.push(`Invalid result_return. Must be one of: ${RESULT_RETURNS.join(', ')}`);
   }
   
-  if (annotation.feedback_correction && !validateFeedbackCorrection(annotation.feedback_correction)) {
-    errors.push(`Invalid feedback_correction. Must be one of: ${FEEDBACK_CORRECTIONS.join(', ')}`);
+  if (annotation.feedback_correction) {
+    if (Array.isArray(annotation.feedback_correction)) {
+      const invalidItems = annotation.feedback_correction.filter(fc => !validateFeedbackCorrection(fc));
+      if (invalidItems.length > 0) {
+        errors.push(`Invalid feedback_correction items: ${invalidItems.join(', ')}`);
+      }
+    } else {
+      errors.push(`feedback_correction must be an array`);
+    }
   }
   
   return errors;

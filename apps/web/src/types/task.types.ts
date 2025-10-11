@@ -37,7 +37,7 @@ export interface TaskResult {
   classification: string;
   nutrition?: NutritionData;
   result_return_judgement?: string;
-  feedback_correction?: string;
+  feedback_correction?: string[];
   annotated_by?: string;
   annotated_at?: string;
 }
@@ -118,7 +118,7 @@ export interface TaskAnnotation {
   classification: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
   nutrition?: NutritionData;
   result_return_judgement?: 'result_return' | 'no_result_return';
-  feedback_correction?: 'wrong_food' | 'incorrect_nutrition' | 'incorrect_ingredients' | 'wrong_portion_size' | 'no_feedback' | 'correct_feedback';
+  feedback_correction?: ('wrong_food' | 'incorrect_nutrition' | 'incorrect_ingredients' | 'wrong_portion_size' | 'no_feedback' | 'correct_feedback')[];
 }
 
 export interface EndUserFeedback {
