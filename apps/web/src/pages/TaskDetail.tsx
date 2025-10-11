@@ -23,6 +23,8 @@ import {
   Tooltip,
   Paper,
   Modal,
+  CopyButton,
+  Code,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
@@ -38,6 +40,7 @@ import {
   IconCheck,
   IconX,
   IconZoomIn,
+  IconCopy,
 } from '@tabler/icons-react';
 import { taskService } from '../services/task.service';
 import { TaskAnnotation, ParsedAIOutput } from '../types/task.types';
@@ -397,7 +400,23 @@ export function TaskDetail() {
                     />
                   )}
                   <Stack gap="xs" mt="md">
-                    <Text size="xs" c="dimmed">URL:</Text>
+                    <Group justify="space-between" align="flex-start">
+                      <Text size="xs" c="dimmed">Image URL:</Text>
+                      <CopyButton value={task.user_input}>
+                        {({ copied, copy }) => (
+                          <Tooltip label={copied ? 'Copied!' : 'Copy URL'}>
+                            <Button
+                              size="xs"
+                              variant="light"
+                              leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                              onClick={copy}
+                            >
+                              {copied ? 'Copied' : 'Copy Link'}
+                            </Button>
+                          </Tooltip>
+                        )}
+                      </CopyButton>
+                    </Group>
                     <Text size="xs" style={{ wordBreak: 'break-all' }}>
                       {task.user_input}
                     </Text>
@@ -427,39 +446,69 @@ export function TaskDetail() {
           <Grid.Col span={4}>
             <Card h="100%" withBorder p="md">
               <Stack h="100%">
-                <Title order={4}>AI Analysis</Title>
+                <Group justify="space-between">
+                  <Title order={4}>AI Analysis</Title>
+                  {task?.raw_ai_output && (
+                    <CopyButton value={JSON.stringify(task.raw_ai_output, null, 2)}>
+                      {({ copied, copy }) => (
+                        <Tooltip label={copied ? 'Copied!' : 'Copy JSON'}>
+                          <ActionIcon
+                            variant="light"
+                            size="sm"
+                            onClick={copy}
+                          >
+                            {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                    </CopyButton>
+                  )}
+                </Group>
                 <Divider />
                 <ScrollArea h="100%" type="auto">
                   <Stack gap="sm">
-                    {aiDisplayLines.map((line, idx) => {
-                      if (line.startsWith('**') && line.endsWith('**')) {
-                        return (
-                          <Text key={idx} fw={600} size="sm">
-                            {line.replace(/\*\*/g, '')}
-                          </Text>
-                        );
-                      } else if (line.startsWith('  •')) {
-                        return (
-                          <Text key={idx} size="sm" pl="md">
-                            {line}
-                          </Text>
-                        );
-                      } else if (line.startsWith('  ')) {
-                        return (
-                          <Text key={idx} size="sm" pl="md" c="dimmed">
-                            {line}
-                          </Text>
-                        );
-                      } else if (line === '') {
-                        return <Divider key={idx} my="xs" />;
-                      } else {
-                        return (
-                          <Text key={idx} size="sm">
-                            {line}
-                          </Text>
-                        );
-                      }
-                    })}
+                    {aiDisplayLines && aiDisplayLines.length > 0 ? (
+                      <>
+                        {aiDisplayLines.map((line, idx) => {
+                          if (line.startsWith('**') && line.endsWith('**')) {
+                            return (
+                              <Text key={idx} fw={600} size="sm">
+                                {line.replace(/\*\*/g, '')}
+                              </Text>
+                            );
+                          } else if (line.startsWith('  •')) {
+                            return (
+                              <Text key={idx} size="sm" pl="md">
+                                {line}
+                              </Text>
+                            );
+                          } else if (line.startsWith('  ')) {
+                            return (
+                              <Text key={idx} size="sm" pl="md" c="dimmed">
+                                {line}
+                              </Text>
+                            );
+                          } else if (line === '') {
+                            return <Divider key={idx} my="xs" />;
+                          } else {
+                            return (
+                              <Text key={idx} size="sm">
+                                {line}
+                              </Text>
+                            );
+                          }
+                        })}
+                      </>
+                    ) : task?.raw_ai_output ? (
+                      <>
+                        <Text size="sm" fw={500} c="dimmed">Raw AI Output:</Text>
+                        <Code block style={{ fontSize: '11px', maxHeight: '100%', overflow: 'auto' }}>
+                          {JSON.stringify(task.raw_ai_output, null, 2)}
+                        </Code>
+                      </>
+                    ) : (
+                      <Text size="sm" c="dimmed">No AI analysis available</Text>
+                    )}
 
                     {/* Nutrition Warnings */}
                     {nutritionValidation && !nutritionValidation.isValid && (
