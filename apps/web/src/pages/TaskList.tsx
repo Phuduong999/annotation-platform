@@ -27,9 +27,10 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconRefresh, IconEye, IconPlayerPlay, IconUpload, IconColumns, IconPhoto } from '@tabler/icons-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { taskService } from '../services/task.service';
 import { Task, TaskFilter, TaskListResponse } from '../types/task.types';
+import { AnnotationDrawer } from '../components/AnnotationDrawer';
 
 const PAGE_SIZE = 20;
 
@@ -219,6 +220,7 @@ const getColumnStorageKey = (userId: string) => `task-list-columns:${userId || '
 
 export function TaskList() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<TaskFilter>({});
   const [opened, { open, close }] = useDisclosure(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -534,199 +536,15 @@ export function TaskList() {
         </Card>
       </Stack>
 
-      {/* Task Detail Drawer */}
-      <Drawer
+      {/* Annotation Drawer */}
+      <AnnotationDrawer
         opened={opened}
         onClose={close}
-        title={<Text fw={600}>Task Details</Text>}
-        position="right"
-        size="xl"
-        overlayProps={{ opacity: 0.5, blur: 4 }}
-        scrollAreaComponent={ScrollArea.Autosize}
-        padding="md"
-        radius="md"
-        offset={8}
-      >
-        {selectedTask && (
-          <Stack gap="md">
-            {/* Basic Info */}
-            <div>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
-                Basic Information
-              </Text>
-              <Stack gap="xs">
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>ID</Text>
-                  <Code>{selectedTask.id}</Code>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>Request ID</Text>
-                  <Code>{selectedTask.request_id}</Code>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>Status</Text>
-                  <Badge color={getStatusColor(selectedTask.status)}>
-                    {selectedTask.status.replace('_', ' ')}
-                  </Badge>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>Type</Text>
-                  <Badge color={getTypeColor(selectedTask.type)}>
-                    {selectedTask.type}
-                  </Badge>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>AI Confidence</Text>
-                  <Text size="sm">{(selectedTask.ai_confidence * 100).toFixed(1)}%</Text>
-                </Group>
-              </Stack>
-            </div>
-
-            <Divider />
-
-            {/* User & Team Info */}
-            <div>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
-                User & Team
-              </Text>
-              <Stack gap="xs">
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>User ID</Text>
-                  <Code>{selectedTask.user_id}</Code>
-                </Group>
-                {selectedTask.user_email && (
-                  <Group justify="space-between">
-                    <Text size="sm" fw={500}>User Email</Text>
-                    <Text size="sm">{selectedTask.user_email}</Text>
-                  </Group>
-                )}
-                {selectedTask.user_full_name && (
-                  <Group justify="space-between">
-                    <Text size="sm" fw={500}>User Name</Text>
-                    <Text size="sm">{selectedTask.user_full_name}</Text>
-                  </Group>
-                )}
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>Team ID</Text>
-                  <Code>{selectedTask.team_id}</Code>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>Assigned To</Text>
-                  <Text size="sm">{selectedTask.assigned_to || 'Unassigned'}</Text>
-                </Group>
-                {selectedTask.is_logged !== null && selectedTask.is_logged !== undefined && (
-                  <Group justify="space-between">
-                    <Text size="sm" fw={500}>Is Logged</Text>
-                    <Badge color={selectedTask.is_logged ? 'green' : 'gray'} size="sm" variant="light">
-                      {selectedTask.is_logged ? 'Yes' : 'No'}
-                    </Badge>
-                  </Group>
-                )}
-              </Stack>
-            </div>
-
-            <Divider />
-
-            {/* User Logs & Categories (if present) */}
-            {(selectedTask.user_log || selectedTask.edit_category || selectedTask.raw_user_log) && (
-              <>
-                <Divider />
-                <div>
-                  <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
-                    User Logs & Categories
-                  </Text>
-                  <Stack gap="xs">
-                    {selectedTask.edit_category && (
-                      <Group justify="space-between">
-                        <Text size="sm" fw={500}>Edit Category</Text>
-                        <Badge size="sm">{selectedTask.edit_category}</Badge>
-                      </Group>
-                    )}
-                    {selectedTask.user_log && (
-                      <>
-                        <Text size="sm" fw={500}>User Log</Text>
-                        <Code block style={{ whiteSpace: 'pre-wrap', fontSize: '11px' }}>
-                          {selectedTask.user_log}
-                        </Code>
-                      </>
-                    )}
-                    {selectedTask.raw_user_log && (
-                      <>
-                        <Text size="sm" fw={500}>Raw User Log</Text>
-                        <Code block style={{ whiteSpace: 'pre-wrap', fontSize: '11px' }}>
-                          {selectedTask.raw_user_log}
-                        </Code>
-                      </>
-                    )}
-                  </Stack>
-                </div>
-              </>
-            )}
-
-            <Divider />
-
-            {/* User Input */}
-            <div>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
-                User Input
-              </Text>
-              <Code block>{selectedTask.user_input}</Code>
-            </div>
-
-            <Divider />
-
-            {/* AI Output */}
-            <div>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
-                Raw AI Output
-              </Text>
-              <Code block style={{ whiteSpace: 'pre-wrap' }}>
-                {JSON.stringify(selectedTask.raw_ai_output, null, 2)}
-              </Code>
-            </div>
-
-            <Divider />
-
-            {/* Timestamps */}
-            <div>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb="xs">
-                Timestamps
-              </Text>
-              <Stack gap="xs">
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>Scan Date</Text>
-                  <Text size="sm">{new Date(selectedTask.scan_date).toLocaleString()}</Text>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>Created At</Text>
-                  <Text size="sm">{new Date(selectedTask.created_at).toLocaleString()}</Text>
-                </Group>
-                <Group justify="space-between">
-                  <Text size="sm" fw={500}>Updated At</Text>
-                  <Text size="sm">{new Date(selectedTask.updated_at).toLocaleString()}</Text>
-                </Group>
-                {selectedTask.assigned_at && (
-                  <Group justify="space-between">
-                    <Text size="sm" fw={500}>Assigned At</Text>
-                    <Text size="sm">{new Date(selectedTask.assigned_at).toLocaleString()}</Text>
-                  </Group>
-                )}
-              </Stack>
-            </div>
-
-            {/* Actions */}
-            <Divider />
-            <Group justify="flex-end">
-              <Button variant="light" onClick={close}>
-                Close
-              </Button>
-              <Button onClick={() => navigate(`/tasks/${selectedTask.id}`)}>
-                Edit Task
-              </Button>
-            </Group>
-          </Stack>
-        )}
-      </Drawer>
+        task={selectedTask}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        }}
+      />
     </Container>
   );
 }
