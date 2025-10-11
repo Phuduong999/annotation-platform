@@ -132,9 +132,9 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
         size="90%"
         padding={0}
       >
-        <Box h="100vh" style={{ display: 'flex', flexDirection: 'column' }}>
+        <Box style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           {/* Header */}
-          <Paper p="md" withBorder style={{ borderLeft: 0, borderRight: 0, borderTop: 0 }}>
+          <Paper p="md" withBorder style={{ borderLeft: 0, borderRight: 0, borderTop: 0, flexShrink: 0 }}>
             <Stack gap="xs">
               <Group justify="space-between">
                 <Group gap="xs">
@@ -177,7 +177,7 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
           <Grid m={0} gutter={0} style={{ flex: 1, overflow: 'hidden' }}>
             {/* Left: Image + Link Health */}
             <Grid.Col span={4} style={{ borderRight: '1px solid #dee2e6', height: '100%' }}>
-              <ScrollArea h="calc(100vh - 180px)">
+              <ScrollArea h="100%" type="auto">
                 <Stack p="md" gap="md">
                   {/* Image Preview */}
                   <Card withBorder>
@@ -254,7 +254,7 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
 
             {/* Middle: AI Summary + Raw JSON */}
             <Grid.Col span={4} style={{ borderRight: '1px solid #dee2e6', height: '100%' }}>
-              <ScrollArea h="calc(100vh - 180px)">
+              <ScrollArea h="100%" type="auto">
                 <Stack p="md" gap="md">
                   {/* AI Summary */}
                   <Card withBorder>
@@ -321,7 +321,7 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
 
             {/* Right: Read-only Info Blocks */}
             <Grid.Col span={4} style={{ height: '100%' }}>
-              <ScrollArea h="calc(100vh - 180px)">
+              <ScrollArea h="100%" type="auto">
                 <Stack p="md" gap="md">
                   {/* User Type (Immutable from Import) */}
                   {(task.user_email || task.user_full_name || task.is_logged !== null) && (
@@ -440,7 +440,7 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
           </Grid>
 
           {/* Actions Footer */}
-          <Paper p="md" withBorder style={{ borderLeft: 0, borderRight: 0, borderBottom: 0 }}>
+          <Paper p="md" withBorder style={{ borderLeft: 0, borderRight: 0, borderBottom: 0, flexShrink: 0 }}>
             <Group justify="space-between">
               <Group gap="xs">
                 <Text size="xs" c="dimmed">

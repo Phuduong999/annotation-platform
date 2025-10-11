@@ -78,7 +78,9 @@ function App() {
                   path="/tasks/:id"
                   element={
                     <ProtectedRoute>
-                      <AnnotatorRoute taskId="" />
+                      <AppShell>
+                        <TaskDetail />
+                      </AppShell>
                     </ProtectedRoute>
                   }
                 />
