@@ -27,7 +27,7 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconRefresh, IconEye, IconPlayerPlay, IconUpload, IconColumns, IconPhoto } from '@tabler/icons-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { taskService } from '../services/task.service';
 import { Task, TaskFilter, TaskListResponse } from '../types/task.types';
 import { AnnotationDrawer } from '../components/AnnotationDrawer';
@@ -220,7 +220,6 @@ const getColumnStorageKey = (userId: string) => `task-list-columns:${userId || '
 
 export function TaskList() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<TaskFilter>({});
   const [opened, { open, close }] = useDisclosure(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -541,8 +540,21 @@ export function TaskList() {
         opened={opened}
         onClose={close}
         task={selectedTask}
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        tasks={tasksData?.data}
+        onLoadNext={() => {
+          // Find current task index and load next one
+          if (tasksData?.data && selectedTask) {
+            const currentIndex = tasksData.data.findIndex((t: Task) => t.id === selectedTask.id);
+            if (currentIndex >= 0 && currentIndex < tasksData.data.length - 1) {
+              setSelectedTask(tasksData.data[currentIndex + 1]);
+            } else {
+              notifications.show({
+                title: 'No more tasks',
+                message: 'This is the last task in the current page',
+                color: 'blue',
+              });
+            }
+          }
         }}
       />
     </Container>

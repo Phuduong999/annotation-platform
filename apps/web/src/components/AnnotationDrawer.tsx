@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Drawer,
   Grid,
@@ -10,441 +11,477 @@ import {
   Image,
   Badge,
   Divider,
-  SegmentedControl,
-  Select,
-  Textarea,
   Card,
   Code,
   ScrollArea,
   Alert,
-  ActionIcon,
   Modal,
-  Kbd,
+  Tooltip,
+  CopyButton,
+  Box,
+  Paper,
 } from '@mantine/core';
-import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useHotkeys, useDisclosure } from '@mantine/hooks';
 import {
-  IconCheck,
-  IconX,
-  IconZoomIn,
+  IconExternalLink,
   IconAlertTriangle,
   IconInfoCircle,
+  IconArrowRight,
+  IconCopy,
+  IconCheck,
+  IconChevronRight,
 } from '@tabler/icons-react';
-import { taskService } from '../services/task.service';
-import { Task, TaskAnnotation } from '../types/task.types';
+import { Task } from '../types/task.types';
 
 interface AnnotationDrawerProps {
   opened: boolean;
   onClose: () => void;
   task: Task | null;
-  onSuccess?: () => void;
+  tasks?: Task[]; // For Load Next functionality
+  onLoadNext?: () => void;
 }
 
-export function AnnotationDrawer({ opened, onClose, task, onSuccess }: AnnotationDrawerProps) {
-  const queryClient = useQueryClient();
-  const [imageModalOpened, { open: openImageModal, close: closeImageModal }] = useDisclosure(false);
+const ANNOTATION_GUIDE = [
+  {
+    type: 'Meal',
+    description: 'Prepared food items that require nutrition estimation (cooked dishes, restaurant meals, homemade food)',
+  },
+  {
+    type: 'Label',
+    description: 'Nutrition facts labels or text on packaging (ingredient lists, nutrition tables)',
+  },
+  {
+    type: 'Front Label',
+    description: 'Marketing claims or front-of-package text (product names, health claims, certifications)',
+  },
+  {
+    type: 'Screenshot',
+    description: 'Screen captures from apps or websites (recipe pages, delivery apps, menus)',
+  },
+  {
+    type: 'Others',
+    description: 'Any image not fitting above categories (unclear, non-food, corrupted)',
+  },
+];
+
+export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: AnnotationDrawerProps) {
+  const navigate = useNavigate();
+  const [jsonModalOpened, { open: openJsonModal, close: closeJsonModal }] = useDisclosure(false);
   const [imageError, setImageError] = useState(false);
 
-  // Form setup
-  const form = useForm<TaskAnnotation>({
-    initialValues: {
-      scan_type_judgement: '',
-      result_return_judgement: '',
-      corrected_type: '',
-      notes: '',
-    },
-  });
-
-  // Reset form when task changes
-  useState(() => {
+  const handleTakeAction = () => {
     if (task) {
-      form.reset();
-    }
-  });
-
-  // Submit mutation
-  const submitMutation = useMutation({
-    mutationFn: (data: TaskAnnotation) => {
-      if (!task) throw new Error('No task selected');
-      return taskService.submitAnnotation(task.id, data);
-    },
-    onSuccess: () => {
-      notifications.show({
-        title: 'Success',
-        message: 'Annotation submitted successfully',
-        color: 'green',
-      });
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      form.reset();
-      onSuccess?.();
+      navigate(`/tasks/${task.id}`);
       onClose();
-    },
-    onError: (error: any) => {
-      notifications.show({
-        title: 'Error',
-        message: error.response?.data?.error || 'Failed to submit annotation',
-        color: 'red',
-      });
-    },
-  });
-
-  const handleSubmit = () => {
-    if (!form.values.scan_type_judgement || !form.values.result_return_judgement) {
-      notifications.show({
-        title: 'Validation Error',
-        message: 'Please fill all required fields',
-        color: 'orange',
-      });
-      return;
     }
-    submitMutation.mutate(form.values);
   };
 
-  // Quick action handlers
-  const handleQuickCorrect = () => {
-    form.setValues({
-      scan_type_judgement: 'correct_type',
-      result_return_judgement: 'result_return',
-    });
+  const handleLoadNext = () => {
+    if (onLoadNext) {
+      onLoadNext();
+    }
   };
 
-  const handleQuickWrong = () => {
-    form.setValues({
-      scan_type_judgement: 'wrong_type',
-      result_return_judgement: 'no_result_return',
-    });
-  };
-
-  // Keyboard shortcuts (only when drawer is open)
+  // Keyboard shortcuts
   useHotkeys(
     [
-      ['1', () => opened && form.setFieldValue('scan_type_judgement', 'correct_type')],
-      ['2', () => opened && form.setFieldValue('scan_type_judgement', 'wrong_type')],
-      ['3', () => opened && form.setFieldValue('result_return_judgement', 'result_return')],
-      ['4', () => opened && form.setFieldValue('result_return_judgement', 'no_result_return')],
-      ['mod+Enter', (e) => {
-        if (opened) {
-          e.preventDefault();
-          handleSubmit();
-        }
-      }],
+      ['n', () => opened && handleLoadNext()],
+      ['Enter', () => opened && handleTakeAction()],
+      ['Escape', () => opened && onClose()],
     ],
     []
   );
 
   if (!task) return null;
 
+  // Parse AI output for summary
+  const aiSummary = task.raw_ai_output ? (
+    typeof task.raw_ai_output === 'object' ? task.raw_ai_output : 
+    (() => { try { return JSON.parse(task.raw_ai_output); } catch { return null; } })()
+  ) : null;
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return 'yellow';
+      case 'in_progress': return 'blue';
+      case 'completed': return 'green';
+      case 'skipped': return 'gray';
+      default: return 'gray';
+    }
+  };
+
+  const getTypeColor = (type: string) => {
+    switch (type) {
+      case 'meal': return 'grape';
+      case 'label': return 'cyan';
+      case 'front_label': return 'teal';
+      case 'screenshot': return 'orange';
+      default: return 'gray';
+    }
+  };
+
   return (
     <>
       <Drawer
         opened={opened}
         onClose={onClose}
-        title={
-          <Group>
-            <Title order={4}>Quick Annotation</Title>
-            <Badge color="blue">{task.type}</Badge>
-            <Badge color="gray">{task.status}</Badge>
-          </Group>
-        }
+        title={null}
         position="right"
         size="90%"
         padding={0}
       >
-        <Grid m={0} gutter={0} h="calc(100vh - 60px)">
-          {/* Left: Image + User Info (60%) */}
-          <Grid.Col span={7} style={{ borderRight: '1px solid #dee2e6', backgroundColor: '#f8f9fa' }}>
-            <ScrollArea h="100%">
-              <Stack p="md" gap="md">
-                {/* Image */}
-                <Card withBorder p="md">
-                  <Stack gap="xs">
-                    <Group justify="space-between">
-                      <Text size="sm" fw={500}>Food Image</Text>
-                      <ActionIcon variant="light" onClick={openImageModal} disabled={imageError}>
-                        <IconZoomIn size={18} />
-                      </ActionIcon>
-                    </Group>
-                    <Divider />
-                    {imageError ? (
-                      <Alert icon={<IconAlertTriangle />} color="red">
-                        Failed to load image
-                      </Alert>
-                    ) : (
-                      <Image
-                        src={task.user_input}
-                        alt="Task image"
-                        fit="contain"
-                        h={400}
-                        radius="md"
-                        style={{ cursor: 'zoom-in' }}
-                        onError={() => setImageError(true)}
-                        onClick={openImageModal}
-                      />
-                    )}
-                  </Stack>
-                </Card>
-
-                {/* User Information */}
-                {(task.user_email || task.user_full_name) && (
-                  <Card withBorder p="md">
-                    <Stack gap="xs">
-                      <Text size="sm" fw={500}>User Information</Text>
-                      <Divider />
-                      {task.user_full_name && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="dimmed">Name</Text>
-                          <Text size="sm">{task.user_full_name}</Text>
-                        </Group>
-                      )}
-                      {task.user_email && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="dimmed">Email</Text>
-                          <Text size="sm">{task.user_email}</Text>
-                        </Group>
-                      )}
-                      {task.is_logged !== null && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="dimmed">Is Logged</Text>
-                          <Badge color={task.is_logged ? 'green' : 'gray'} size="sm">
-                            {task.is_logged ? 'Yes' : 'No'}
-                          </Badge>
-                        </Group>
-                      )}
-                    </Stack>
-                  </Card>
-                )}
-
-                {/* Feedback from User */}
-                {task.end_user_feedback && (
-                  <Card withBorder p="md">
-                    <Stack gap="xs">
-                      <Text size="sm" fw={500}>User Feedback</Text>
-                      <Divider />
-                      {task.end_user_feedback.reaction && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="dimmed">Reaction</Text>
-                          <Badge color={task.end_user_feedback.reaction === 'like' ? 'green' : 'red'}>
-                            {task.end_user_feedback.reaction}
-                          </Badge>
-                        </Group>
-                      )}
-                      {task.end_user_feedback.category && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="dimmed">Category</Text>
-                          <Badge>{task.end_user_feedback.category}</Badge>
-                        </Group>
-                      )}
-                      {task.end_user_feedback.note && (
-                        <>
-                          <Text size="sm" c="dimmed">Note</Text>
-                          <Text size="sm">{task.end_user_feedback.note}</Text>
-                        </>
-                      )}
-                    </Stack>
-                  </Card>
-                )}
-
-                {/* Edit Category / User Log */}
-                {(task.edit_category || task.user_log) && (
-                  <Card withBorder p="md">
-                    <Stack gap="xs">
-                      <Text size="sm" fw={500}>User Data</Text>
-                      <Divider />
-                      {task.edit_category && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="dimmed">Edit Category</Text>
-                          <Badge>{task.edit_category}</Badge>
-                        </Group>
-                      )}
-                      {task.user_log && (
-                        <>
-                          <Text size="sm" c="dimmed">User Log</Text>
-                          <Code block style={{ fontSize: '11px', whiteSpace: 'pre-wrap' }}>
-                            {task.user_log}
-                          </Code>
-                        </>
-                      )}
-                    </Stack>
-                  </Card>
-                )}
-
-                {/* Raw AI Output */}
-                {task.raw_ai_output && (
-                  <Card withBorder p="md">
-                    <Stack gap="xs">
-                      <Text size="sm" fw={500}>AI Output (Raw)</Text>
-                      <Divider />
-                      <Code block style={{ fontSize: '10px', maxHeight: 200, overflow: 'auto' }}>
-                        {JSON.stringify(task.raw_ai_output, null, 2)}
-                      </Code>
-                    </Stack>
-                  </Card>
-                )}
-              </Stack>
-            </ScrollArea>
-          </Grid.Col>
-
-          {/* Right: Annotation Form (40%) */}
-          <Grid.Col span={5} style={{ backgroundColor: '#fff' }}>
-            <ScrollArea h="100%">
-              <Stack p="md" gap="md">
-                <div>
-                  <Title order={4}>Your Annotation</Title>
+        <Box h="100vh" style={{ display: 'flex', flexDirection: 'column' }}>
+          {/* Header */}
+          <Paper p="md" withBorder style={{ borderLeft: 0, borderRight: 0, borderTop: 0 }}>
+            <Stack gap="xs">
+              <Group justify="space-between">
+                <Group gap="xs">
+                  <Title order={4}>Quick Preview</Title>
+                  <Badge color={getTypeColor(task.type)}>{task.type}</Badge>
+                  <Badge color={getStatusColor(task.status)}>{task.status}</Badge>
+                </Group>
+                <CopyButton value={task.request_id}>
+                  {({ copied, copy }) => (
+                    <Tooltip label={copied ? 'Copied!' : 'Copy Request ID'}>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                        onClick={copy}
+                      >
+                        {task.request_id.slice(0, 8)}...
+                      </Button>
+                    </Tooltip>
+                  )}
+                </CopyButton>
+              </Group>
+              <Group gap="md">
+                <Text size="sm" c="dimmed">
+                  <b>Assigned:</b> {task.assigned_to || 'Unassigned'}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  <b>Created:</b> {new Date(task.created_at).toLocaleString()}
+                </Text>
+                {task.assigned_at && (
                   <Text size="sm" c="dimmed">
-                    Label this task quickly and accurately
+                    <b>Assigned at:</b> {new Date(task.assigned_at).toLocaleString()}
                   </Text>
-                </div>
+                )}
+              </Group>
+            </Stack>
+          </Paper>
 
-                {/* Quick Actions */}
-                <Card withBorder p="md" bg="gray.0">
-                  <Text size="sm" fw={500} mb="sm">Quick Actions</Text>
-                  <Stack gap="xs">
-                    <Button
-                      fullWidth
-                      variant="light"
-                      color="green"
-                      leftSection={<IconCheck size={18} />}
-                      onClick={handleQuickCorrect}
-                    >
-                      ✓ Correct & Complete
-                    </Button>
-                    <Button
-                      fullWidth
-                      variant="light"
-                      color="red"
-                      leftSection={<IconX size={18} />}
-                      onClick={handleQuickWrong}
-                    >
-                      ✗ Wrong Type / No Result
-                    </Button>
-                  </Stack>
-                </Card>
+          {/* Content Grid */}
+          <Grid m={0} gutter={0} style={{ flex: 1, overflow: 'hidden' }}>
+            {/* Left: Image + Link Health */}
+            <Grid.Col span={4} style={{ borderRight: '1px solid #dee2e6', height: '100%' }}>
+              <ScrollArea h="calc(100vh - 180px)">
+                <Stack p="md" gap="md">
+                  {/* Image Preview */}
+                  <Card withBorder>
+                    <Stack gap="xs">
+                      <Group justify="space-between">
+                        <Text size="sm" fw={500}>Image Preview</Text>
+                        <Tooltip label="Open in new tab">
+                          <ActionIcon
+                            variant="light"
+                            component="a"
+                            href={task.user_input}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <IconExternalLink size={18} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </Group>
+                      <Divider />
+                      {imageError ? (
+                        <Alert icon={<IconAlertTriangle />} color="red">
+                          Failed to load image
+                        </Alert>
+                      ) : (
+                        <Image
+                          src={task.user_input}
+                          alt="Task image"
+                          fit="contain"
+                          h={300}
+                          radius="md"
+                          onError={() => setImageError(true)}
+                        />
+                      )}
+                      <CopyButton value={task.user_input}>
+                        {({ copied, copy }) => (
+                          <Button
+                            size="xs"
+                            variant="light"
+                            fullWidth
+                            leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+                            onClick={copy}
+                          >
+                            {copied ? 'Copied!' : 'Copy Image URL'}
+                          </Button>
+                        )}
+                      </CopyButton>
+                    </Stack>
+                  </Card>
 
-                <Divider />
+                  {/* Link Health Info */}
+                  <Card withBorder>
+                    <Stack gap="xs">
+                      <Text size="sm" fw={500}>Link Health</Text>
+                      <Divider />
+                      <Group justify="space-between">
+                        <Text size="xs" c="dimmed">Status</Text>
+                        <Badge size="sm" color={imageError ? 'red' : 'green'}>
+                          {imageError ? 'Error' : 'OK'}
+                        </Badge>
+                      </Group>
+                      <Group justify="space-between">
+                        <Text size="xs" c="dimmed">MIME Type</Text>
+                        <Text size="xs">image/*</Text>
+                      </Group>
+                      <Group justify="space-between">
+                        <Text size="xs" c="dimmed">AI Confidence</Text>
+                        <Text size="xs">{(task.ai_confidence * 100).toFixed(1)}%</Text>
+                      </Group>
+                    </Stack>
+                  </Card>
+                </Stack>
+              </ScrollArea>
+            </Grid.Col>
 
-                {/* Annotation Form */}
-                <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-                  <Stack gap="md">
-                    {/* Scan Type Judgement */}
-                    <div>
-                      <Text size="sm" fw={500} mb="xs">
-                        Scan Type Judgement <Text component="span" c="red">*</Text>
-                      </Text>
-                      <SegmentedControl
+            {/* Middle: AI Summary + Raw JSON */}
+            <Grid.Col span={4} style={{ borderRight: '1px solid #dee2e6', height: '100%' }}>
+              <ScrollArea h="calc(100vh - 180px)">
+                <Stack p="md" gap="md">
+                  {/* AI Summary */}
+                  <Card withBorder>
+                    <Stack gap="xs">
+                      <Text size="sm" fw={500}>AI Analysis Summary</Text>
+                      <Divider />
+                      {aiSummary ? (
+                        <>
+                          {aiSummary.name_food && (
+                            <div>
+                              <Text size="xs" c="dimmed">Food Name</Text>
+                              <Text size="sm" fw={500}>{aiSummary.name_food}</Text>
+                            </div>
+                          )}
+                          {aiSummary.ingredients && (
+                            <div>
+                              <Text size="xs" c="dimmed">Ingredients Count</Text>
+                              <Text size="sm">
+                                {Array.isArray(aiSummary.ingredients) 
+                                  ? aiSummary.ingredients.length 
+                                  : Object.keys(aiSummary.ingredients || {}).length} items
+                              </Text>
+                            </div>
+                          )}
+                          {aiSummary.calories && (
+                            <div>
+                              <Text size="xs" c="dimmed">Calories</Text>
+                              <Text size="sm" fw={500}>{aiSummary.calories} kcal</Text>
+                            </div>
+                          )}
+                          {aiSummary.total_fat && (
+                            <Group gap="xl">
+                              <div>
+                                <Text size="xs" c="dimmed">Fat</Text>
+                                <Text size="sm">{aiSummary.total_fat}g</Text>
+                              </div>
+                              <div>
+                                <Text size="xs" c="dimmed">Protein</Text>
+                                <Text size="sm">{aiSummary.protein || 0}g</Text>
+                              </div>
+                              <div>
+                                <Text size="xs" c="dimmed">Carbs</Text>
+                                <Text size="sm">{aiSummary.carbohydrate || 0}g</Text>
+                              </div>
+                            </Group>
+                          )}
+                        </>
+                      ) : (
+                        <Text size="sm" c="dimmed">No AI analysis available</Text>
+                      )}
+                      <Button
+                        size="xs"
+                        variant="light"
                         fullWidth
-                        value={form.values.scan_type_judgement}
-                        onChange={(value) => form.setFieldValue('scan_type_judgement', value)}
-                        data={[
-                          { label: '✓ Correct', value: 'correct_type' },
-                          { label: '✗ Wrong', value: 'wrong_type' },
-                        ]}
-                      />
-                      <Text size="xs" c="dimmed" mt={4}>
-                        Press <Kbd>1</Kbd> for Correct, <Kbd>2</Kbd> for Wrong
-                      </Text>
-                    </div>
+                        onClick={openJsonModal}
+                      >
+                        View Raw JSON
+                      </Button>
+                    </Stack>
+                  </Card>
+                </Stack>
+              </ScrollArea>
+            </Grid.Col>
 
-                    {/* Result Return Judgement */}
-                    <div>
-                      <Text size="sm" fw={500} mb="xs">
-                        Result Return Judgement <Text component="span" c="red">*</Text>
-                      </Text>
-                      <SegmentedControl
-                        fullWidth
-                        value={form.values.result_return_judgement}
-                        onChange={(value) => form.setFieldValue('result_return_judgement', value)}
-                        data={[
-                          { label: '✓ Return', value: 'result_return' },
-                          { label: '✗ No Return', value: 'no_result_return' },
-                        ]}
-                      />
-                      <Text size="xs" c="dimmed" mt={4}>
-                        Press <Kbd>3</Kbd> for Return, <Kbd>4</Kbd> for No Return
-                      </Text>
-                    </div>
+            {/* Right: Read-only Info Blocks */}
+            <Grid.Col span={4} style={{ height: '100%' }}>
+              <ScrollArea h="calc(100vh - 180px)">
+                <Stack p="md" gap="md">
+                  {/* User Type (Immutable from Import) */}
+                  {(task.user_email || task.user_full_name || task.is_logged !== null) && (
+                    <Card withBorder>
+                      <Stack gap="xs">
+                        <Group gap="xs">
+                          <IconInfoCircle size={16} />
+                          <Text size="sm" fw={500}>User Info (From Import)</Text>
+                        </Group>
+                        <Divider />
+                        {task.user_full_name && (
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Name</Text>
+                            <Text size="sm">{task.user_full_name}</Text>
+                          </Group>
+                        )}
+                        {task.user_email && (
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Email</Text>
+                            <Text size="sm">{task.user_email}</Text>
+                          </Group>
+                        )}
+                        {task.is_logged !== null && task.is_logged !== undefined && (
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Is Logged</Text>
+                            <Badge size="sm" color={task.is_logged ? 'green' : 'gray'}>
+                              {task.is_logged ? 'Yes' : 'No'}
+                            </Badge>
+                          </Group>
+                        )}
+                        {task.edit_category && (
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Edit Category</Text>
+                            <Badge size="sm">{task.edit_category}</Badge>
+                          </Group>
+                        )}
+                      </Stack>
+                    </Card>
+                  )}
 
-                    {/* Corrected Type */}
-                    <Select
-                      label="Corrected Type (if wrong)"
-                      placeholder="Select correct type"
-                      data={[
-                        { value: 'meal', label: 'Meal' },
-                        { value: 'label', label: 'Label' },
-                        { value: 'front_label', label: 'Front Label' },
-                        { value: 'screenshot', label: 'Screenshot' },
-                        { value: 'others', label: 'Others' },
-                      ]}
-                      value={form.values.corrected_type}
-                      onChange={(value) => form.setFieldValue('corrected_type', value || '')}
-                      clearable
-                    />
+                  {/* Current Label Summary (if annotated) */}
+                  {task.status === 'completed' && (
+                    <Card withBorder>
+                      <Stack gap="xs">
+                        <Text size="sm" fw={500}>Current Annotation</Text>
+                        <Divider />
+                        <Group justify="space-between">
+                          <Text size="xs" c="dimmed">Annotated Type</Text>
+                          <Badge size="sm" color={getTypeColor(task.type)}>
+                            {task.type}
+                          </Badge>
+                        </Group>
+                        <Alert icon={<IconInfoCircle />} color="blue" variant="light">
+                          This task has been annotated. Click "Take Action" to view or modify.
+                        </Alert>
+                      </Stack>
+                    </Card>
+                  )}
 
-                    {/* Notes */}
-                    <Textarea
-                      label="Notes (optional)"
-                      placeholder="Add any additional comments..."
-                      value={form.values.notes}
-                      onChange={(e) => form.setFieldValue('notes', e.target.value)}
-                      minRows={3}
-                      maxRows={6}
-                    />
+                  {/* End-user Feedback (Read-only) */}
+                  {task.end_user_feedback && (
+                    <Card withBorder>
+                      <Stack gap="xs">
+                        <Text size="sm" fw={500}>End-User Feedback</Text>
+                        <Divider />
+                        {task.end_user_feedback.reaction && (
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Reaction</Text>
+                            <Badge
+                              size="sm"
+                              color={task.end_user_feedback.reaction === 'like' ? 'green' : 'red'}
+                            >
+                              {task.end_user_feedback.reaction}
+                            </Badge>
+                          </Group>
+                        )}
+                        {task.end_user_feedback.category && (
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Category</Text>
+                            <Badge size="sm">{task.end_user_feedback.category}</Badge>
+                          </Group>
+                        )}
+                        {task.end_user_feedback.note && (
+                          <>
+                            <Text size="xs" c="dimmed">Note</Text>
+                            <Text size="sm">{task.end_user_feedback.note}</Text>
+                          </>
+                        )}
+                      </Stack>
+                    </Card>
+                  )}
 
-                    {/* Submit Button */}
-                    <Button
-                      type="submit"
-                      size="lg"
-                      fullWidth
-                      loading={submitMutation.isPending}
-                      rightSection={<Text size="sm">Ctrl+Enter</Text>}
-                    >
-                      Submit Annotation
-                    </Button>
-                  </Stack>
-                </form>
+                  {/* Annotation Guide */}
+                  <Card withBorder bg="blue.0">
+                    <Stack gap="xs">
+                      <Group gap="xs">
+                        <IconInfoCircle size={16} />
+                        <Text size="sm" fw={500}>Quick Guide</Text>
+                      </Group>
+                      <Divider />
+                      {ANNOTATION_GUIDE.map((guide) => (
+                        <div key={guide.type}>
+                          <Text size="xs" fw={600} c={guide.type === task.type ? 'blue' : 'dark'}>
+                            {guide.type}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            {guide.description}
+                          </Text>
+                        </div>
+                      ))}
+                    </Stack>
+                  </Card>
+                </Stack>
+              </ScrollArea>
+            </Grid.Col>
+          </Grid>
 
-                {/* Annotation Guide */}
-                <Card withBorder p="sm" bg="blue.0">
-                  <Group gap="xs" mb="xs">
-                    <IconInfoCircle size={16} />
-                    <Text size="sm" fw={500}>Quick Guide</Text>
-                  </Group>
-                  <Stack gap="xs">
-                    <div>
-                      <Text size="xs" fw={500}>Meal</Text>
-                      <Text size="xs" c="dimmed">Prepared food requiring nutrition estimation</Text>
-                    </div>
-                    <div>
-                      <Text size="xs" fw={500}>Label</Text>
-                      <Text size="xs" c="dimmed">Nutrition facts or packaging text</Text>
-                    </div>
-                    <div>
-                      <Text size="xs" fw={500}>Front Label</Text>
-                      <Text size="xs" c="dimmed">Marketing claims on packaging</Text>
-                    </div>
-                  </Stack>
-                </Card>
-              </Stack>
-            </ScrollArea>
-          </Grid.Col>
-        </Grid>
+          {/* Actions Footer */}
+          <Paper p="md" withBorder style={{ borderLeft: 0, borderRight: 0, borderBottom: 0 }}>
+            <Group justify="space-between">
+              <Group gap="xs">
+                <Text size="xs" c="dimmed">
+                  Press <Badge size="sm" variant="light">Enter</Badge> to take action,{' '}
+                  <Badge size="sm" variant="light">N</Badge> for next
+                </Text>
+              </Group>
+              <Group gap="xs">
+                {onLoadNext && (
+                  <Button
+                    variant="light"
+                    leftSection={<IconChevronRight size={16} />}
+                    onClick={handleLoadNext}
+                  >
+                    Load Next
+                  </Button>
+                )}
+                <Button
+                  variant="filled"
+                  rightSection={<IconArrowRight size={16} />}
+                  onClick={handleTakeAction}
+                >
+                  Take Action
+                </Button>
+              </Group>
+            </Group>
+          </Paper>
+        </Box>
       </Drawer>
 
-      {/* Image Full-Screen Modal */}
+      {/* Raw JSON Modal (Read-only) */}
       <Modal
-        opened={imageModalOpened}
-        onClose={closeImageModal}
-        size="100%"
-        fullScreen
-        title={`Task: ${task.request_id}`}
+        opened={jsonModalOpened}
+        onClose={closeJsonModal}
+        title="Raw AI Output (Read-only)"
+        size="xl"
       >
-        <Image
-          src={task.user_input}
-          alt="Task image full-screen"
-          fit="contain"
-          h="90vh"
-        />
+        <ScrollArea h="70vh">
+          <Code block style={{ fontSize: '11px' }}>
+            {JSON.stringify(task.raw_ai_output, null, 2)}
+          </Code>
+        </ScrollArea>
       </Modal>
     </>
   );
