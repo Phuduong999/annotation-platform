@@ -399,28 +399,21 @@ export function TaskDetail() {
                       onClick={() => setImageModalOpened(true)}
                     />
                   )}
-                  <Stack gap="xs" mt="md">
-                    <Group justify="space-between" align="flex-start">
-                      <Text size="xs" c="dimmed">Image URL:</Text>
-                      <CopyButton value={task.user_input}>
-                        {({ copied, copy }) => (
-                          <Tooltip label={copied ? 'Copied!' : 'Copy URL'}>
-                            <Button
-                              size="xs"
-                              variant="light"
-                              leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-                              onClick={copy}
-                            >
-                              {copied ? 'Copied' : 'Copy Link'}
-                            </Button>
-                          </Tooltip>
-                        )}
-                      </CopyButton>
-                    </Group>
-                    <Text size="xs" style={{ wordBreak: 'break-all' }}>
-                      {task.user_input}
-                    </Text>
-                  </Stack>
+                  <Divider my="sm" />
+                  <Group justify="center">
+                    <CopyButton value={task.user_input}>
+                      {({ copied, copy }) => (
+                        <Button
+                          variant="light"
+                          fullWidth
+                          leftSection={copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                          onClick={copy}
+                        >
+                          {copied ? 'URL Copied!' : 'Copy Image URL'}
+                        </Button>
+                      )}
+                    </CopyButton>
+                  </Group>
                 </ScrollArea>
               </Stack>
             </Card>
@@ -467,45 +460,12 @@ export function TaskDetail() {
                 <Divider />
                 <ScrollArea h="100%" type="auto">
                   <Stack gap="sm">
-                    {aiDisplayLines && aiDisplayLines.length > 0 ? (
-                      <>
-                        {aiDisplayLines.map((line, idx) => {
-                          if (line.startsWith('**') && line.endsWith('**')) {
-                            return (
-                              <Text key={idx} fw={600} size="sm">
-                                {line.replace(/\*\*/g, '')}
-                              </Text>
-                            );
-                          } else if (line.startsWith('  •')) {
-                            return (
-                              <Text key={idx} size="sm" pl="md">
-                                {line}
-                              </Text>
-                            );
-                          } else if (line.startsWith('  ')) {
-                            return (
-                              <Text key={idx} size="sm" pl="md" c="dimmed">
-                                {line}
-                              </Text>
-                            );
-                          } else if (line === '') {
-                            return <Divider key={idx} my="xs" />;
-                          } else {
-                            return (
-                              <Text key={idx} size="sm">
-                                {line}
-                              </Text>
-                            );
-                          }
-                        })}
-                      </>
-                    ) : task?.raw_ai_output ? (
-                      <>
-                        <Text size="sm" fw={500} c="dimmed">Raw AI Output:</Text>
-                        <Code block style={{ fontSize: '11px', maxHeight: '100%', overflow: 'auto' }}>
-                          {JSON.stringify(task.raw_ai_output, null, 2)}
-                        </Code>
-                      </>
+                    {task?.raw_ai_output ? (
+                      <Code block style={{ fontSize: '11px', maxHeight: '100%', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                        {typeof task.raw_ai_output === 'string' 
+                          ? task.raw_ai_output 
+                          : JSON.stringify(task.raw_ai_output, null, 2)}
+                      </Code>
                     ) : (
                       <Text size="sm" c="dimmed">No AI analysis available</Text>
                     )}
