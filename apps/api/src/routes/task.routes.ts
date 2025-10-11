@@ -534,11 +534,14 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         },
         body: {
           type: 'object',
-          required: ['scan_type', 'result_return', 'feedback_correction'],
+          required: ['scan_type', 'result_return'],
           properties: {
             scan_type: { type: 'string', enum: SCAN_TYPES },
             result_return: { type: 'string', enum: RESULT_RETURNS },
-            feedback_correction: { type: 'string', enum: FEEDBACK_CORRECTIONS },
+            feedback_correction: { 
+              type: 'array',
+              items: { type: 'string', enum: FEEDBACK_CORRECTIONS },
+            },
             note: { type: 'string' },
             draft: { type: 'boolean', default: true },
           },
@@ -599,11 +602,14 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         },
         body: {
           type: 'object',
-          required: ['scan_type', 'result_return', 'feedback_correction'],
+          required: ['scan_type', 'result_return'],
           properties: {
             scan_type: { type: 'string', enum: SCAN_TYPES },
             result_return: { type: 'string', enum: RESULT_RETURNS },
-            feedback_correction: { type: 'string', enum: FEEDBACK_CORRECTIONS },
+            feedback_correction: { 
+              type: 'array',
+              items: { type: 'string', enum: FEEDBACK_CORRECTIONS },
+            },
             note: { type: 'string' },
           },
         },

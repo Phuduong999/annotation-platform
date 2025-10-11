@@ -5,7 +5,7 @@ import { Task, TaskStats, TaskFilter, TaskAnnotation, TaskListResponse } from '.
 export interface AnnotationRequest {
   scan_type: 'meal' | 'label' | 'front_label' | 'screenshot' | 'others';
   result_return: 'correct_result' | 'wrong_result' | 'no_result';
-  feedback_correction: 'wrong_food' | 'incorrect_nutrition' | 'incorrect_ingredients' | 'wrong_portion_size';
+  feedback_correction?: ('wrong_food' | 'incorrect_nutrition' | 'incorrect_ingredients' | 'wrong_portion_size' | 'no_feedback' | 'correct_feedback')[];
   note?: string;
   draft?: boolean;
 }
@@ -93,13 +93,27 @@ export class TaskService {
     return response.data.data;
   }
 
+  // Helper to map TaskAnnotation to AnnotationRequest
+  private mapToAnnotationRequest(annotation: TaskAnnotation): AnnotationRequest {
+    return {
+      scan_type: annotation.classification,
+      result_return: annotation.result_return_judgement === 'result_return' ? 'correct_result' : 'no_result',
+      feedback_correction: annotation.feedback_correction,
+      note: undefined,
+      draft: false,
+    };
+  }
+
   async saveTaskAnnotation(taskId: string, annotation: TaskAnnotation): Promise<Task> {
-    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/annotate`, annotation);
+    const apiRequest = this.mapToAnnotationRequest(annotation);
+    apiRequest.draft = true;
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/annotate`, apiRequest);
     return response.data.data;
   }
 
   async submitTask(taskId: string, annotation: TaskAnnotation): Promise<Task> {
-    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/submit`, annotation);
+    const apiRequest = this.mapToAnnotationRequest(annotation);
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/submit`, apiRequest);
     return response.data.data;
   }
 
