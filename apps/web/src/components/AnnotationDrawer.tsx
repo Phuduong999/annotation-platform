@@ -20,6 +20,7 @@ import {
   CopyButton,
   Box,
   Paper,
+  ActionIcon,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useHotkeys, useDisclosure } from '@mantine/hooks';
