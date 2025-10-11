@@ -211,19 +211,7 @@ export function TaskDetail() {
     const validation = form.validate();
     let hasErrors = validation.hasErrors;
 
-    if (!form.values.scan_type_judgement) {
-      form.setFieldError('scan_type_judgement', 'Required');
-      hasErrors = true;
-    } else {
-      form.setFieldError('scan_type_judgement', null);
-    }
-
-    if (!form.values.result_return_judgement) {
-      form.setFieldError('result_return_judgement', 'Required');
-      hasErrors = true;
-    } else {
-      form.setFieldError('result_return_judgement', null);
-    }
+    // Validation handled by form.validate() - no manual checks needed
 
     if (hasErrors) {
       notifications.show({
