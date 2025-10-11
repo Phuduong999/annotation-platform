@@ -62,6 +62,20 @@ export function TaskDetail() {
     enabled: !!id,
   });
 
+  // Auto-start task when loaded if status is pending
+  const startTaskMutation = useMutation({
+    mutationFn: () => taskService.startTask(id!, 'user123'), // Mock user ID
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['task', id] });
+    },
+  });
+
+  useEffect(() => {
+    if (task && task.status === 'pending') {
+      startTaskMutation.mutate();
+    }
+  }, [task?.id, task?.status]);
+
   // Parse AI output
   const parsedAI = useMemo<ParsedAIOutput>(() => {
     if (!task?.raw_ai_output) return {};
