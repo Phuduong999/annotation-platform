@@ -37,14 +37,13 @@ export class ExportService {
     if (filters) {
       if (filters.snapshot_id) params.append('snapshot_id', filters.snapshot_id);
       if (filters.format) params.append('format', filters.format);
-      if (filters.split) params.append('split', filters.split);
       if (filters.status) params.append('status', filters.status);
       if (filters.created_by) params.append('created_by', filters.created_by);
       if (filters.from_date) params.append('from_date', filters.from_date);
       if (filters.to_date) params.append('to_date', filters.to_date);
     }
 
-    const response = await axios.get(`${this.apiUrl}/exports?${params.toString()}`);
+    const response = await axios.get(`${this.apiUrl}/exports/list?${params.toString()}`);
     return response.data.data;
   }
 
@@ -86,11 +85,6 @@ export class ExportService {
       throw new Error('Export download URL not available');
     }
 
-    // Use the download URL directly or fallback to API endpoint
-    const downloadUrl = exportItem.download_url.startsWith('http') 
-      ? exportItem.download_url 
-      : `${this.apiUrl}/exports/${exportItem.id}/download`;
-
     const blob = await this.downloadExport(exportItem.id);
     
     // Create blob URL and trigger download
@@ -117,8 +111,92 @@ export class ExportService {
       case 'csv': return 'csv';
       case 'json': return 'json';
       case 'jsonl': return 'jsonl';
-      case 'parquet': return 'parquet';
+      case 'xlsx': return 'xlsx';
       default: return 'txt';
+    }
+  }
+
+  // Direct export download methods (connects to /exports endpoint)
+  async downloadDirectExport(snapshotId: string, format: ExportFormat, split: DataSplit = 'all'): Promise<void> {
+    try {
+      const params = new URLSearchParams({
+        snapshot: snapshotId,
+        format: format,
+        split: split
+      });
+
+      const response = await axios.get(`${this.apiUrl}/exports?${params.toString()}`, {
+        responseType: 'blob',
+      });
+
+      // Get filename from Content-Disposition header or generate one
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = `export-${snapshotId}-${split}.${this.getFileExtension(format)}`;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+
+      // Create blob URL and trigger download
+      const blob = new Blob([response.data], { 
+        type: response.headers['content-type'] 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download failed:', error);
+      throw error;
+    }
+  }
+
+  // Stream export download (for large datasets)
+  async downloadStreamExport(snapshotId: string, format: ExportFormat, split: DataSplit = 'all'): Promise<void> {
+    try {
+      const params = new URLSearchParams({
+        snapshot: snapshotId,
+        format: format,
+        split: split
+      });
+
+      const response = await axios.get(`${this.apiUrl}/exports/stream?${params.toString()}`, {
+        responseType: 'blob',
+      });
+
+      // Get filename from Content-Disposition header or generate one
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = `export-${snapshotId}-${split}.${this.getFileExtension(format)}`;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
+      }
+
+      // Create blob URL and trigger download
+      const blob = new Blob([response.data], { 
+        type: response.headers['content-type'] 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download failed:', error);
+      throw error;
     }
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useDisclosure } from '@mantine/hooks';
 import {
   Container,
@@ -14,10 +14,7 @@ import {
   Stack,
   Loader,
   Center,
-  Drawer,
   ScrollArea,
-  Divider,
-  Code,
   Table,
   Pagination,
   Menu,
@@ -220,6 +217,7 @@ const getColumnStorageKey = (userId: string) => `task-list-columns:${userId || '
 
 export function TaskList() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [filter, setFilter] = useState<TaskFilter>({});
   const [opened, { open, close }] = useDisclosure(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -317,6 +315,20 @@ export function TaskList() {
     queryFn: () => taskService.getTaskStats(),
     refetchInterval: 30000, // Refetch every 30 seconds
   });
+
+  // Handle opening drawer when navigated from TaskDetail (e.g., when it's the last task)
+  useEffect(() => {
+    const state = location.state as { openDrawerForTask?: string } | null;
+    if (state?.openDrawerForTask && tasksData?.tasks) {
+      const taskToOpen = tasksData.tasks.find((t: Task) => t.id === state.openDrawerForTask);
+      if (taskToOpen) {
+        setSelectedTask(taskToOpen);
+        open();
+        // Clear the state to prevent reopening on refresh
+        window.history.replaceState({}, document.title);
+      }
+    }
+  }, [location.state, tasksData?.tasks, open]);
 
   // Get next task
   const handleGetNextTask = async () => {
@@ -540,18 +552,40 @@ export function TaskList() {
         opened={opened}
         onClose={close}
         task={selectedTask}
-        tasks={tasksData?.data}
-        onLoadNext={() => {
-          // Find current task index and load next one
-          if (tasksData?.data && selectedTask) {
-            const currentIndex = tasksData.data.findIndex((t: Task) => t.id === selectedTask.id);
-            if (currentIndex >= 0 && currentIndex < tasksData.data.length - 1) {
-              setSelectedTask(tasksData.data[currentIndex + 1]);
-            } else {
+        tasks={tasksData?.tasks}
+        onLoadNext={async () => {
+          // Find current task index and load next one from current page first
+          if (tasksData?.tasks && selectedTask) {
+            const currentIndex = tasksData.tasks.findIndex((t: Task) => t.id === selectedTask.id);
+            
+            // If there's a next task in current page, load it
+            if (currentIndex >= 0 && currentIndex < tasksData.tasks.length - 1) {
+              setSelectedTask(tasksData.tasks[currentIndex + 1]);
+              return;
+            }
+            
+            // Otherwise, try to load next task from API (could be in next page)
+            try {
+              const nextTask = await taskService.getNextTask(currentUser);
+              if (nextTask) {
+                setSelectedTask(nextTask);
+                notifications.show({
+                  title: 'Next task loaded',
+                  message: 'Loaded next available task',
+                  color: 'green',
+                });
+              } else {
+                notifications.show({
+                  title: 'No more tasks',
+                  message: 'This is the last task available',
+                  color: 'blue',
+                });
+              }
+            } catch (error) {
               notifications.show({
-                title: 'No more tasks',
-                message: 'This is the last task in the current page',
-                color: 'blue',
+                title: 'Error',
+                message: 'Failed to load next task',
+                color: 'red',
               });
             }
           }

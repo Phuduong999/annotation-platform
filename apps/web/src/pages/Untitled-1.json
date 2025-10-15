@@ -1,0 +1,230 @@
+[
+  {
+    "Date": "2025-10-05T00:00:00Z",
+    "Request ID": "68e2eff9783e4ce1499f0c4a",
+    "User ID": "684c39cf6e8cd5bdedf77ff0",
+    "Team ID": "669ebef4c23e4b0025b12009",
+    "User Email": "br4facebook@gmail.com",
+    "User Full Name": "Brittany Rodriguez",
+    "User Current Team": "669ebef4c23e4b0025b12009",
+    "Type": "meal",
+    "User Input": "https://d3dup6m8d4r9vm.cloudfront.net/images/669ebef4c23e4b0025b12009/684c39cf6e8cd5bdedf77ff0/original/1759703027474-694b3ede-cc43-49b4-8d6c-4f954fb9692f.jpg?Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9kM2R1cDZtOGQ0cjl2bS5jbG91ZGZyb250Lm5ldCoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTk3NDYyMTExNDZ9fX1dfQ__&Signature=pyS8TA2tbwYhqSPL9zpHmQ6omYAdTa3vpeq8uDiowuQMv1WBST~NPn7ivA1okIhs8jBMEosV7-E6Ln9WQBG-opO7EDdCVsUucwEzs412ltcvwL5MJKSkY0R81UkYSH5J6W5rTqoxnWpkje~CmJCusLOSrcm0XohuMJQ9KLS-N5oieyq8aAOwWa7Cbwe6UR4TCJgMot7upZMoPKmwFCEeHOG7QYB8MhfNh85UMI51Lvi5jJtdEDXtYUPqCFqI9ol9Bq9K-0WKofGlf57I9gdDmGBffoEYBfYDXWs6-HnPYmb5rqkHx2Eu1300ReJH9IfCvdkI~q-5VAYlNknAIyxhSw__&Key-Pair-Id=K36J4VKFG8ULEV",
+    "View Image URL": "https://d3dup6m8d4r9vm.cloudfront.net/images/669ebef4c23e4b0025b12009/684c39cf6e8cd5bdedf77ff0/original/1759703027474-694b3ede-cc43-49b4-8d6c-4f954fb9692f.jpg?Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9kM2R1cDZtOGQ0cjl2bS5jbG91ZGZyb250Lm5ldCoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTk3NDYyMTExNDZ9fX1dfQ__&Signature=pyS8TA2tbwYhqSPL9zpHmQ6omYAdTa3vpeq8uDiowuQMv1WBST~NPn7ivA1okIhs8jBMEosV7-E6Ln9WQBG-opO7EDdCVsUucwEzs412ltcvwL5MJKSkY0R81UkYSH5J6W5rTqoxnWpkje~CmJCusLOSrcm0XohuMJQ9KLS-N5oieyq8aAOwWa7Cbwe6UR4TCJgMot7upZMoPKmwFCEeHOG7QYB8MhfNh85UMI51Lvi5jJtdEDXtYUPqCFqI9ol9Bq9K-0WKofGlf57I9gdDmGBffoEYBfYDXWs6-HnPYmb5rqkHx2Eu1300ReJH9IfCvdkI~q-5VAYlNknAIyxhSw__&Key-Pair-Id=K36J4VKFG8ULEV",
+    "Is Logged": "No",
+    "Reaction": "dislike",
+    "Feedback": "",
+    "Feedback Category": "Wrong food",
+    "Edit Category": "",
+    "AI Output Log": "{\"name_food\":\"Buffalo Cauliflo...",
+    "User Log": "...",
+    "Created At": "Oct 6, 2025, 01:00",
+    "Updated At": "Oct 6, 2025, 01:00",
+    "Raw Ai Output": {
+      "name_food": "Buffalo Cauliflower with Noodles",
+      "ingredients": [
+        {
+          "name": "cauliflower",
+          "quantity": 150,
+          "nutrition": {
+            "protein": 2.97,
+            "fat": 0.15,
+            "carbs": 7.95,
+            "calories": 37.5
+          },
+          "unit": "gram",
+          "source": "system_generated"
+        },
+        {
+          "name": "buffalo sauce",
+          "quantity": 50,
+          "nutrition": {
+            "protein": 0.5,
+            "fat": 5,
+            "carbs": 3,
+            "calories": 50
+          },
+          "unit": "gram",
+          "source": "ai_generated"
+        },
+        {
+          "name": "green chili pepper",
+          "quantity": 1,
+          "nutrition": {
+            "protein": 0.5,
+            "fat": 0.2,
+            "carbs": 1,
+            "calories": 5
+          },
+          "unit": "piece",
+          "source": "ai_generated"
+        },
+        {
+          "name": "noodles",
+          "quantity": 80,
+          "nutrition": {
+            "protein": 3.608,
+            "fat": 1.648,
+            "carbs": 20.008,
+            "calories": 109.6
+          },
+          "unit": "gram",
+          "source": "system_generated"
+        }
+      ],
+      "nutrition": [
+        {
+          "protein": 3.97,
+          "fat": 5.3500000000000005,
+          "carbs": 11.95,
+          "calories": 92.5
+        },
+        {
+          "protein": 3.608,
+          "fat": 1.648,
+          "carbs": 20.008,
+          "calories": 109.6
+        }
+      ],
+      "number_of_servings": 1
+    },
+    "label skip?": "no skip",
+    "Raw User Log": "",
+    "scan type?": "meal",
+    "result return?": "correct result",
+    "feedback correction?": "no feedback",
+    "Reason?": ""
+  },
+  {
+    "Date": "2025-10-05T00:00:00Z",
+    "Request ID": "68e2d331ec672a81ed693df0",
+    "User ID": "6789851afecf58cf0336cb61",
+    "Team ID": "5ff04c528ed4ff0013192759",
+    "User Email": "buitrieuan@gmail.com",
+    "User Full Name": "Millie Bui",
+    "User Current Team": "5ff04c528ed4ff0013192759",
+    "Type": "meal",
+    "User Input": "https://d3dup6m8d4r9vm.cloudfront.net/images/5ff04c528ed4ff0013192759/6789851afecf58cf0336cb61/original/1759695645757-a04d5d84-e36f-498f-9bf5-9ca720422b42.png?Signature=uxR5vT9RD6yzZohU04RmeBF-JLwhSptkXU2jxrZ8kGES5JPS3mybkkyL0PHxgJ4OWnw~HIDqsuc57yIgihv-bLX3Wz8nIDl2VnoAwBSWd1DSPUOxUQRk1AZlvDqbBxGTd~kMnidm5xLUoiuO6ci3OChUfCq4CryLBgsJQAGd2hU-V-Mfl9LhDnmwWiFCPXJiDgJEMeTR7ihqmCMcPf0dIJAWxfPRv1Hox4Nva7259992a1ExOIKaEzOSa8B9JII-NHVMgLt8jgWOBj7DS~kLhuqNNhmLGmW9VE1oLfPc54Dfl~CSzO45-I5ab8dS-l8xPjBV9nKiSc~drkB50E7Iww__&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9kM2R1cDZtOGQ0cjl2bS5jbG91ZGZyb250Lm5ldCoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTk3Mzg4NTYyNzJ9fX1dfQ__&Key-Pair-Id=K36J4VKFG8ULEV",
+    "": "https://d3dup6m8d4r9vm.cloudfront.net/images/5ff04c528ed4ff0013192759/6789851afecf58cf0336cb61/original/1759695645757-a04d5d84-e36f-498f-9bf5-9ca720422b42.png?Signature=uxR5vT9RD6yzZohU04RmeBF-JLwhSptkXU2jxrZ8kGES5JPS3mybkkyL0PHxgJ4OWnw~HIDqsuc57yIgihv-bLX3Wz8nIDl2VnoAwBSWd1DSPUOxUQRk1AZlvDqbBxGTd~kMnidm5xLUoiuO6ci3OChUfCq4CryLBgsJQAGd2hU-V-Mfl9LhDnmwWiFCPXJiDgJEMeTR7ihqmCMcPf0dIJAWxfPRv1Hox4Nva7259992a1ExOIKaEzOSa8B9JII-NHVMgLt8jgWOBj7DS~kLhuqNNhmLGmW9VE1oLfPc54Dfl~CSzO45-I5ab8dS-l8xPjBV9nKiSc~drkB50E7Iww__&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9kM2R1cDZtOGQ0cjl2bS5jbG91ZGZyb250Lm5ldCoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTk3Mzg4NTYyNzJ9fX1dfQ__&Key-Pair-Id=K36J4VKFG8ULEV",
+    "__1": "#REF!",
+    "Is Logged": "No",
+    "Reaction": "",
+    "Feedback": "",
+    "Feedback Category": "",
+    "Edit Category": "",
+    "AI Output Log": "{\"name_food\":\"Breakfast Plate ...",
+    "User Log": "...",
+    "Created At": "Oct 6, 2025, 01:00",
+    "Updated At": "Oct 6, 2025, 01:00",
+    "Raw Ai Output": {
+      "name_food": "Breakfast Plate with Scrambled Eggs, Bacon, Toast, and Spinach",
+      "ingredients": [
+        {
+          "name": "egg",
+          "quantity": 3,
+          "nutrition": {
+            "protein": 18,
+            "fat": 15,
+            "carbs": 1.5,
+            "calories": 210
+          },
+          "unit": "piece",
+          "source": "ai_generated"
+        },
+        {
+          "name": "black pepper",
+          "quantity": 0.5,
+          "nutrition": {
+            "protein": 0.2737,
+            "fat": 0.0815,
+            "carbs": 1.6203,
+            "calories": 6.375
+          },
+          "unit": "teaspoon",
+          "source": "system_generated"
+        },
+        {
+          "name": "parsley",
+          "quantity": 5,
+          "nutrition": {
+            "protein": 0.1485,
+            "fat": 0.0395,
+            "carbs": 0.3165,
+            "calories": 1.8
+          },
+          "unit": "gram",
+          "source": "system_generated"
+        },
+        {
+          "name": "bacon",
+          "quantity": 3,
+          "nutrition": {
+            "protein": 9,
+            "fat": 24,
+            "carbs": 0,
+            "calories": 270
+          },
+          "unit": "slice",
+          "source": "ai_generated"
+        },
+        {
+          "name": "bread",
+          "quantity": 2,
+          "nutrition": {
+            "protein": 6,
+            "fat": 2,
+            "carbs": 28,
+            "calories": 160
+          },
+          "unit": "slice",
+          "source": "ai_generated"
+        },
+        {
+          "name": "spinach",
+          "quantity": 30,
+          "nutrition": {
+            "protein": 0.858,
+            "fat": 0.117,
+            "carbs": 1.089,
+            "calories": 6.9
+          },
+          "unit": "gram",
+          "source": "system_generated"
+        }
+      ],
+      "nutrition": [
+        {
+          "protein": 18.4222,
+          "fat": 15.121,
+          "carbs": 3.4368000000000003,
+          "calories": 218.175
+        },
+        {
+          "protein": 9,
+          "fat": 24,
+          "carbs": 0,
+          "calories": 270
+        },
+        {
+          "protein": 6,
+          "fat": 2,
+          "carbs": 28,
+          "calories": 160
+        },
+        {
+          "protein": 0.858,
+          "fat": 0.117,
+          "carbs": 1.089,
+          "calories": 6.9
+        }
+      ],
+      "number_of_servings": 1
+    },
+    "label skip?": "no skip",
+    "Raw User Log": "",
+    "scan type?": "meal",
+    "result return?": "correct result",
+    "feedback correction?": "no feedback",
+    "Reason?": ""
+  }
+]
+

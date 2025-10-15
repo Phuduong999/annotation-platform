@@ -248,23 +248,29 @@ export function Import() {
               File Format Requirements
             </Text>
             <Text size="xs" c="dimmed">
-              Your CSV/JSON file must include the following required fields:
+              Your CSV/XLSX/JSON file must include the following required fields:
             </Text>
             <List size="xs" spacing="xs">
               <List.Item>
                 <strong>Required:</strong> date, request_id, user_id, team_id, type, user_input, raw_ai_output
               </List.Item>
               <List.Item>
-                <strong>Optional:</strong> user_email, user_full_name, user_log, raw_user_log, is_logged, edit_category, ai_output_log, reaction, feedback_category, feedback (note)
+                <strong>Optional Task Fields:</strong> user_email, user_full_name, user_log, raw_user_log, is_logged, edit_category, ai_output_log
+              </List.Item>
+              <List.Item>
+                <strong>Optional Feedback Fields:</strong> reaction, feedback_category, feedback (note) - creates read-only feedback events
+              </List.Item>
+              <List.Item>
+                <strong>Optional Label Annotation Fields:</strong> scan type?, result return?, feedback correction?, reason? (or note), label skip? - creates completed tasks with labels_final records
               </List.Item>
               <List.Item>
                 <strong>type</strong> must be: meal, label, front_label, screenshot, or others
               </List.Item>
               <List.Item>
-                <strong>JSON format:</strong> Array of objects with field names (case-insensitive, spaces allowed)
+                <strong>JSON format:</strong> Array of objects with field names (case-insensitive, spaces and special characters normalized)
               </List.Item>
               <List.Item>
-                <strong>Feedback fields</strong> (reaction, feedback_category, feedback) create read-only feedback events
+                <strong>Label Import:</strong> If you include annotation fields (scan type?, result return?), tasks will be created as "completed" with the annotation labels already saved
               </List.Item>
             </List>
           </Stack>

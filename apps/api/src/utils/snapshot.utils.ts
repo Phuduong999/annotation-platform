@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { Pool } from 'pg';
+import * as XLSX from 'xlsx';
 
 /**
  * Generate SHA-256 checksum for data
@@ -312,6 +313,56 @@ export function convertToCSV(items: any[]): string {
  */
 export function convertToJSONL(items: any[]): string {
   return items.map(item => JSON.stringify(item)).join('\n');
+}
+
+/**
+ * Convert snapshot items to Excel format
+ */
+export function convertToExcel(items: any[]): Buffer {
+  if (items.length === 0) {
+    // Return empty workbook
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([['No data']]);
+    XLSX.utils.book_append_sheet(wb, ws, 'Data');
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  }
+  
+  // Flatten nested objects for Excel
+  const flattenedItems = items.map(item => {
+    const flattened: any = {};
+    Object.keys(item).forEach(key => {
+      const value = item[key];
+      if (value === null || value === undefined) {
+        flattened[key] = '';
+      } else if (typeof value === 'object' && !Array.isArray(value)) {
+        // Flatten nested objects
+        Object.keys(value).forEach(nestedKey => {
+          flattened[`${key}.${nestedKey}`] = value[nestedKey];
+        });
+      } else if (Array.isArray(value)) {
+        // Convert arrays to comma-separated strings
+        flattened[key] = value.join(', ');
+      } else {
+        flattened[key] = value;
+      }
+    });
+    return flattened;
+  });
+  
+  // Create workbook and worksheet
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(flattenedItems);
+  
+  // Auto-size columns
+  const cols = Object.keys(flattenedItems[0]).map(key => ({
+    wch: Math.max(key.length, 10)
+  }));
+  ws['!cols'] = cols;
+  
+  XLSX.utils.book_append_sheet(wb, ws, 'Data');
+  
+  // Convert to buffer
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
 
 /**

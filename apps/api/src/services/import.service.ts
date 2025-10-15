@@ -238,6 +238,24 @@ export class ImportService {
           rowData.feedback_note = extras.feedbackNote;
         }
 
+        if (extras.labelAnnotation) {
+          if (extras.labelAnnotation.scanType) {
+            rowData.label_scan_type = extras.labelAnnotation.scanType;
+          }
+          if (extras.labelAnnotation.resultReturn) {
+            rowData.label_result_return = extras.labelAnnotation.resultReturn;
+          }
+          if (extras.labelAnnotation.feedbackCorrection) {
+            rowData.label_feedback_correction = JSON.stringify(extras.labelAnnotation.feedbackCorrection);
+          }
+          if (extras.labelAnnotation.note) {
+            rowData.label_note = extras.labelAnnotation.note;
+          }
+          if (extras.labelAnnotation.labelSkip) {
+            rowData.label_skip = extras.labelAnnotation.labelSkip;
+          }
+        }
+
         await this.storeImportRow(jobId, {
           lineNumber,
           status: 'valid',
@@ -494,12 +512,19 @@ export class ImportService {
       reaction?: 'like' | 'dislike' | 'neutral';
       feedbackCategory?: string;
       feedbackNote?: string;
+      labelAnnotation?: {
+        scanType?: string;
+        resultReturn?: string;
+        feedbackCorrection?: string[];
+        note?: string;
+        labelSkip?: string;
+      };
     };
   } {
     const normalized: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {
       if (typeof key !== 'string') continue;
-      const cleanKey = key.trim().toLowerCase().replace(/\s+/g, '_');
+      const cleanKey = key.trim().toLowerCase().replace(/\s+/g, '_').replace(/\?/g, '');
       normalized[cleanKey] = value;
     }
 
@@ -611,10 +636,56 @@ export class ImportService {
     const extras = {
       reaction: this.normalizeReaction(normalized.reaction ?? normalized.feedback_reaction),
       feedbackCategory: this.normalizeString(normalized.feedback_category),
-      feedbackNote: this.normalizeString(normalized.feedback_note),
+      feedbackNote: this.normalizeString(normalized.feedback_note ?? normalized.feedback),
+      labelAnnotation: this.extractLabelAnnotation(normalized),
     };
 
     return { normalizedRow: row, extras };
+  }
+
+  private extractLabelAnnotation(normalized: Record<string, unknown>): {
+    scanType?: string;
+    resultReturn?: string;
+    feedbackCorrection?: string[];
+    note?: string;
+    labelSkip?: string;
+  } | undefined {
+    const scanType = this.normalizeString(normalized.scan_type);
+    const resultReturn = this.normalizeString(normalized.result_return);
+    const feedbackCorrection = this.normalizeFeedbackCorrection(normalized.feedback_correction);
+    const note = this.normalizeString(normalized.reason ?? normalized.note);
+    const labelSkip = this.normalizeString(normalized.label_skip);
+
+    if (!scanType && !resultReturn && !feedbackCorrection && !note && !labelSkip) {
+      return undefined;
+    }
+
+    return {
+      scanType,
+      resultReturn,
+      feedbackCorrection,
+      note,
+      labelSkip,
+    };
+  }
+
+  private normalizeFeedbackCorrection(value: unknown): string[] | undefined {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed.toLowerCase() === 'no feedback') {
+        return undefined;
+      }
+      return trimmed.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    }
+    
+    if (Array.isArray(value)) {
+      const filtered = value
+        .map((v) => (typeof v === 'string' ? v.trim() : String(v)))
+        .filter((s) => s.length > 0 && s.toLowerCase() !== 'no feedback');
+      return filtered.length > 0 ? filtered : undefined;
+    }
+
+    return undefined;
   }
 
   private prepareRawAiOutput(value: unknown): string {

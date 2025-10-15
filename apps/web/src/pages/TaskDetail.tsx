@@ -42,6 +42,7 @@ import {
   IconX,
   IconZoomIn,
   IconCopy,
+  IconInfoCircle,
 } from '@tabler/icons-react';
 import { taskService } from '../services/task.service';
 import { TaskAnnotation, ParsedAIOutput } from '../types/task.types';
@@ -71,7 +72,7 @@ export function TaskDetail() {
   });
 
   useEffect(() => {
-    if (task && task.status === 'pending') {
+    if (task && (task.status === 'pending' || task.status === 'assigned')) {
       startTaskMutation.mutate();
     }
   }, [task?.id, task?.status]);
@@ -153,10 +154,12 @@ export function TaskDetail() {
       });
       queryClient.invalidateQueries({ queryKey: ['task', id] });
     },
-    onError: () => {
+    onError: (error: any) => {
+      console.error('Save error:', error);
+      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to save task annotation';
       notifications.show({
         title: 'Error',
-        message: 'Failed to save task annotation',
+        message: errorMessage,
         color: 'red',
         icon: <IconX />,
       });
@@ -167,20 +170,25 @@ export function TaskDetail() {
   const submitMutation = useMutation({
     mutationFn: (data: TaskAnnotation) => taskService.submitTask(id!, data),
     onSuccess: () => {
+      const isResubmission = task?.status === 'completed';
       notifications.show({
-        title: 'Submitted',
-        message: 'Task completed successfully',
+        title: isResubmission ? 'Re-submitted' : 'Submitted',
+        message: isResubmission ? 'Task annotation updated successfully' : 'Task completed successfully',
         color: 'green',
         icon: <IconCheck />,
       });
       queryClient.invalidateQueries({ queryKey: ['task', id] });
-      // Navigate to next task
-      handleGetNextTask();
+      // Navigate to next task (only for new submissions, not re-submissions)
+      if (!isResubmission) {
+        handleGetNextTask();
+      }
     },
-    onError: () => {
+    onError: (error: any) => {
+      console.error('Submit error:', error);
+      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to submit task';
       notifications.show({
         title: 'Error',
-        message: 'Failed to submit task',
+        message: errorMessage,
         color: 'red',
         icon: <IconX />,
       });
@@ -193,10 +201,23 @@ export function TaskDetail() {
     onSuccess: () => {
       notifications.show({
         title: 'Skipped',
-        message: 'Task skipped',
+        message: 'Task skipped, loading next...',
         color: 'yellow',
       });
+      // Close modal if open
+      modals.closeAll();
+      // Navigate to next task
       handleGetNextTask();
+    },
+    onError: (error: any) => {
+      console.error('Skip error:', error);
+      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to skip task';
+      notifications.show({
+        title: 'Error',
+        message: errorMessage,
+        color: 'red',
+        icon: <IconX />,
+      });
     },
   });
 
@@ -207,10 +228,26 @@ export function TaskDetail() {
       if (nextTask) {
         navigate(`/tasks/${nextTask.id}`);
       } else {
-        navigate('/tasks');
+        // No next task available, go back to list and open drawer for current task
+        notifications.show({
+          title: 'No more tasks',
+          message: 'This is the last task. Returning to task list.',
+          color: 'blue',
+        });
+        navigate('/tasks', { 
+          state: { 
+            openDrawerForTask: id // Pass current task id to open drawer
+          } 
+        });
       }
     } catch (error) {
-      navigate('/tasks');
+      console.error('Error getting next task:', error);
+      // On error, go back to list and try to open drawer for current task
+      navigate('/tasks', { 
+        state: { 
+          openDrawerForTask: id 
+        } 
+      });
     }
   };
 
@@ -232,6 +269,50 @@ export function TaskDetail() {
         title: 'Validation Error',
         message: 'Please fix the form errors before submitting',
         color: 'red',
+      });
+      return;
+    }
+
+    // If task is already completed, ask for confirmation
+    if (task?.status === 'completed') {
+      modals.openConfirmModal({
+        title: 'Re-submit Completed Task?',
+        children: (
+          <Stack gap="sm">
+            <Text size="sm">
+              This task was already completed. Are you sure you want to re-submit with new changes?
+            </Text>
+            <Text size="xs" c="dimmed">
+              This will update the annotation and keep the task as completed.
+            </Text>
+          </Stack>
+        ),
+        labels: { confirm: 'Re-submit', cancel: 'Cancel' },
+        confirmProps: { color: 'orange' },
+        onConfirm: () => {
+          // Check nutrition validation
+          if (nutritionValidation && !nutritionValidation.isValid) {
+            modals.openConfirmModal({
+              title: 'Nutrition Warning',
+              children: (
+                <Stack gap="sm">
+                  <Text size="sm">There are nutrition validation warnings:</Text>
+                  {nutritionValidation.warnings.map((warning, idx) => (
+                    <Alert key={idx} color="yellow" icon={<IconAlertTriangle />}>
+                      {warning}
+                    </Alert>
+                  ))}
+                  <Text size="sm">Do you want to submit anyway?</Text>
+                </Stack>
+              ),
+              labels: { confirm: 'Submit Anyway', cancel: 'Cancel' },
+              confirmProps: { color: 'red' },
+              onConfirm: () => submitMutation.mutate(form.values),
+            });
+          } else {
+            submitMutation.mutate(form.values);
+          }
+        },
       });
       return;
     }
@@ -260,9 +341,6 @@ export function TaskDetail() {
     }
   };
 
-  const [skipReason, setSkipReason] = useState<string>('');
-  const [skipReasonType, setSkipReasonType] = useState<'predefined' | 'custom'>('predefined');
-
   const PREDEFINED_SKIP_REASONS = [
     'Math Error Detected',
     'Insufficient Image Quality',
@@ -271,14 +349,23 @@ export function TaskDetail() {
   ];
 
   const handleSkip = () => {
-    modals.openConfirmModal({
-      title: 'Skip Task',
-      children: (
-        <Stack gap="sm">
+    const SkipModalContent = ({ context, id }: any) => {
+      const [localReason, setLocalReason] = useState('');
+      const [localType, setLocalType] = useState<'predefined' | 'custom'>('predefined');
+
+      const handleConfirm = () => {
+        if (localReason) {
+          skipMutation.mutate(localReason);
+          // Modal will be closed by skipMutation.onSuccess
+        }
+      };
+
+      return (
+        <Stack gap="md">
           <Text size="sm">Select a reason for skipping this task:</Text>
           <Radio.Group
-            value={skipReasonType}
-            onChange={(value) => setSkipReasonType(value as 'predefined' | 'custom')}
+            value={localType}
+            onChange={(value) => setLocalType(value as 'predefined' | 'custom')}
           >
             <Stack gap="xs">
               <Radio value="predefined" label="Select from common reasons" />
@@ -286,38 +373,47 @@ export function TaskDetail() {
             </Stack>
           </Radio.Group>
           
-          {skipReasonType === 'predefined' ? (
+          {localType === 'predefined' ? (
             <Select
               placeholder="Select reason"
               data={PREDEFINED_SKIP_REASONS}
-              value={skipReason}
-              onChange={(value) => setSkipReason(value || '')}
+              value={localReason}
+              onChange={(value) => setLocalReason(value || '')}
               required
+              withinPortal
             />
           ) : (
             <Textarea
               placeholder="Enter custom reason"
-              value={skipReason}
-              onChange={(e) => setSkipReason(e.currentTarget.value)}
+              value={localReason}
+              onChange={(e) => setLocalReason(e.currentTarget.value)}
               required
               minRows={3}
             />
           )}
+
+          <Group justify="flex-end" gap="sm" mt="md">
+            <Button variant="default" onClick={() => context.closeModal(id)}>
+              Cancel
+            </Button>
+            <Button 
+              color="yellow" 
+              onClick={handleConfirm}
+              disabled={!localReason}
+              loading={skipMutation.isPending}
+            >
+              Skip Task
+            </Button>
+          </Group>
         </Stack>
-      ),
-      labels: { confirm: 'Skip', cancel: 'Cancel' },
-      confirmProps: { color: 'yellow', disabled: !skipReason },
-      onConfirm: () => {
-        if (skipReason) {
-          skipMutation.mutate(skipReason);
-          setSkipReason('');
-          setSkipReasonType('predefined');
-        }
-      },
-      onCancel: () => {
-        setSkipReason('');
-        setSkipReasonType('predefined');
-      },
+      );
+    };
+
+    modals.open({
+      modalId: 'skip-task-modal',
+      title: 'Skip Task',
+      children: <SkipModalContent context={modals} id="skip-task-modal" />,
+      size: 'md',
     });
   };
 
@@ -485,7 +581,7 @@ export function TaskDetail() {
                   )}
                 </Group>
                 <Divider />
-                <ScrollArea h="100%" type="auto">
+                <ScrollArea style={{ minHeight: '200px', maxHeight: '600px' }} type="auto">
                   <Stack gap="sm">
                     {task?.raw_ai_output ? (
                       <Code block style={{ fontSize: '11px', whiteSpace: 'pre-wrap' }}>
@@ -636,20 +732,44 @@ export function TaskDetail() {
 
                   {/* Action Buttons */}
                   <Stack gap="sm">
+                    {/* Status Indicator */}
+                    {task.status === 'completed' && (
+                      <Alert icon={<IconCheck />} color="green" variant="light">
+                        <Text size="sm" fw={500}>Task Completed</Text>
+                        <Text size="xs" c="dimmed">You can edit and re-submit if needed</Text>
+                      </Alert>
+                    )}
+                    
+                    {task.status === 'in_progress' && (
+                      <Alert icon={<IconInfoCircle />} color="blue" variant="light">
+                        <Text size="sm">Working on this task</Text>
+                      </Alert>
+                    )}
+
                     <Group grow>
-                      <Tooltip label="Save draft (⌘+S)">
-                        <Button
-                          variant="light"
-                          leftSection={<IconDeviceFloppy size={20} />}
-                          onClick={handleSave}
-                          loading={saveMutation.isPending}
-                        >
-                          Save
-                        </Button>
-                      </Tooltip>
-                      <Tooltip label="Submit and next (⌘+Enter)">
+                      {/* Save Draft - only show if not completed */}
+                      {task.status !== 'completed' && (
+                        <Tooltip label="Save your work without submitting (⌘+S)">
+                          <Button
+                            variant="light"
+                            leftSection={<IconDeviceFloppy size={20} />}
+                            onClick={handleSave}
+                            loading={saveMutation.isPending}
+                          >
+                            Save Draft
+                          </Button>
+                        </Tooltip>
+                      )}
+
+                      {/* Submit/Re-submit button */}
+                      <Tooltip label={
+                        task.status === 'completed' 
+                          ? "Re-submit changes (⌘+Enter)" 
+                          : "Complete and move to next task (⌘+Enter)"
+                      }>
                         <Button
                           variant="filled"
+                          color={task.status === 'completed' ? 'orange' : 'blue'}
                           leftSection={<IconSend size={20} />}
                           onClick={handleSubmit}
                           loading={submitMutation.isPending}
@@ -657,22 +777,27 @@ export function TaskDetail() {
                             !form.values.classification ||
                             !form.values.result_return_judgement
                           }
+                          fullWidth={task.status === 'completed'}
                         >
-                          Submit
+                          {task.status === 'completed' ? 'Re-submit Changes' : 'Submit & Next'}
                         </Button>
                       </Tooltip>
                     </Group>
-                    <Tooltip label="Skip task (⌘+Shift+S)">
-                      <Button
-                        variant="subtle"
-                        color="yellow"
-                        leftSection={<IconPlayerSkipForward size={20} />}
-                        onClick={handleSkip}
-                        loading={skipMutation.isPending}
-                      >
-                        Skip Task
-                      </Button>
-                    </Tooltip>
+
+                    {/* Skip - only show if not completed */}
+                    {task.status !== 'completed' && (
+                      <Tooltip label="Skip this task and move to next (⌘+Shift+S)">
+                        <Button
+                          variant="subtle"
+                          color="yellow"
+                          leftSection={<IconPlayerSkipForward size={20} />}
+                          onClick={handleSkip}
+                          loading={skipMutation.isPending}
+                        >
+                          Skip Task
+                        </Button>
+                      </Tooltip>
+                    )}
                   </Stack>
                 </Stack>
               </Card>

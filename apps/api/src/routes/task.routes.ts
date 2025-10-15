@@ -10,6 +10,7 @@ import {
   RESULT_RETURNS,
   FEEDBACK_CORRECTIONS,
 } from '../types/annotation.types.js';
+import { ValidationError, NotFoundError, ForbiddenError } from '../utils/errors.js';
 
 export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
   const taskService = new TaskService(pool);
@@ -22,8 +23,11 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         querystring: {
           type: 'object',
           properties: {
-            status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'rejected'] },
+            status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'rejected', 'failed', 'skipped'] },
             user_id: { type: 'string' },
+            type: { type: 'string', enum: ['meal', 'label', 'front_label', 'screenshot', 'others'] },
+            assigned_to_me: { type: 'string' },
+            has_dislike: { type: 'string' },
             limit: { type: 'number', default: 100 },
             offset: { type: 'number', default: 0 },
           },
@@ -35,6 +39,9 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         Querystring: {
           status?: string;
           user_id?: string;
+          type?: string;
+          assigned_to_me?: string;
+          has_dislike?: string;
           limit?: number;
           offset?: number;
         };
@@ -42,18 +49,27 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
       reply: FastifyReply
     ) => {
       try {
-        const { status, user_id, limit = 100, offset = 0 } = request.query;
+        const { status, user_id, type, assigned_to_me, has_dislike, limit = 100, offset = 0 } = request.query;
 
         let query = `
           SELECT 
             t.*,
             json_build_object(
-              'reaction', f.reaction,
-              'category', f.category,
-              'note', f.note
-            ) as end_user_feedback
+              'reaction', f.metadata->>'reaction',
+              'category', f.metadata->>'category',
+              'note', f.metadata->>'note'
+            ) as end_user_feedback,
+            json_build_object(
+              'scan_type', lf.scan_type,
+              'result_return', lf.result_return,
+              'feedback_correction', lf.feedback_correction,
+              'note', lf.note,
+              'created_by', lf.created_by,
+              'created_at', lf.created_at
+            ) as annotation
           FROM tasks t
-          LEFT JOIN feedback_events f ON t.request_id = f.request_id
+          LEFT JOIN feedback_events f ON t.id = f.task_id
+          LEFT JOIN labels_final lf ON lf.task_id = t.id
           WHERE 1=1
         `;
         const params: any[] = [];
@@ -65,10 +81,31 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
           paramIndex++;
         }
 
+        if (type) {
+          query += ` AND t.scan_type = $${paramIndex}`;
+          params.push(type);
+          paramIndex++;
+        }
+
         if (user_id) {
           query += ` AND t.assigned_to = $${paramIndex}`;
           params.push(user_id);
           paramIndex++;
+        }
+
+        if (assigned_to_me === 'true') {
+          // For now use hardcoded user, but should come from auth
+          query += ` AND t.assigned_to = $${paramIndex}`;
+          params.push('user123');
+          paramIndex++;
+        }
+
+        if (has_dislike === 'true') {
+          query += ` AND EXISTS (
+            SELECT 1 FROM feedback_events fe 
+            WHERE fe.task_id = t.id 
+            AND fe.metadata->>'reaction' = 'dislike'
+          )`;
         }
 
         query += ` ORDER BY t.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
@@ -77,20 +114,40 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         const result = await pool.query(query, params);
 
         // Get total count for pagination
-        let countQuery = 'SELECT COUNT(*) FROM tasks WHERE 1=1';
+        let countQuery = 'SELECT COUNT(*) FROM tasks t WHERE 1=1';
         const countParams: any[] = [];
         let countParamIndex = 1;
 
         if (status) {
-          countQuery += ` AND status = $${countParamIndex}`;
+          countQuery += ` AND t.status = $${countParamIndex}`;
           countParams.push(status);
           countParamIndex++;
         }
 
+        if (type) {
+          countQuery += ` AND t.scan_type = $${countParamIndex}`;
+          countParams.push(type);
+          countParamIndex++;
+        }
+
         if (user_id) {
-          countQuery += ` AND assigned_to = $${countParamIndex}`;
+          countQuery += ` AND t.assigned_to = $${countParamIndex}`;
           countParams.push(user_id);
           countParamIndex++;
+        }
+
+        if (assigned_to_me === 'true') {
+          countQuery += ` AND t.assigned_to = $${countParamIndex}`;
+          countParams.push('user123');
+          countParamIndex++;
+        }
+
+        if (has_dislike === 'true') {
+          countQuery += ` AND EXISTS (
+            SELECT 1 FROM feedback_events fe 
+            WHERE fe.task_id = t.id 
+            AND fe.metadata->>'reaction' = 'dislike'
+          )`;
         }
 
         const countResult = await pool.query(countQuery, countParams);
@@ -145,17 +202,26 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
       try {
         const { id } = request.params;
 
-        // Get task details with feedback
+        // Get task details with feedback and annotation
         const taskResult = await pool.query(
           `SELECT 
             t.*,
             json_build_object(
-              'reaction', f.reaction,
-              'category', f.category,
-              'note', f.note
-            ) as end_user_feedback
+              'reaction', f.metadata->>'reaction',
+              'category', f.metadata->>'category',
+              'note', f.metadata->>'note'
+            ) as end_user_feedback,
+            json_build_object(
+              'scan_type', lf.scan_type,
+              'result_return', lf.result_return,
+              'feedback_correction', lf.feedback_correction,
+              'note', lf.note,
+              'created_by', lf.created_by,
+              'created_at', lf.created_at
+            ) as annotation
           FROM tasks t
-          LEFT JOIN feedback_events f ON t.request_id = f.request_id
+          LEFT JOIN feedback_events f ON t.id = f.task_id
+          LEFT JOIN labels_final lf ON lf.task_id = t.id
           WHERE t.id = $1`,
           [id]
         );
@@ -173,10 +239,10 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         // Get end-user feedback if exists
         const feedbackResult = await pool.query(
           `SELECT * FROM feedback_events 
-           WHERE request_id = $1
+           WHERE task_id = $1
            ORDER BY created_at DESC
            LIMIT 1`,
-          [task.request_id]
+          [task.id]
         );
 
         // Attach feedback to task
@@ -502,6 +568,30 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
       } catch (error) {
         fastify.log.error(error);
         
+        if (error instanceof ValidationError) {
+          return reply.code(400).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
+        if (error instanceof NotFoundError) {
+          return reply.code(404).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
+        if (error instanceof ForbiddenError) {
+          return reply.code(403).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
         // Handle specific conflict case
         if (error instanceof Error && error.message.includes('already in progress')) {
           return reply.code(409).send({
@@ -579,6 +669,31 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         });
       } catch (error) {
         fastify.log.error(error);
+        
+        if (error instanceof ValidationError) {
+          return reply.code(400).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
+        if (error instanceof NotFoundError) {
+          return reply.code(404).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
+        if (error instanceof ForbiddenError) {
+          return reply.code(403).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
         return reply.code(500).send({
           success: false,
           error: error instanceof Error ? error.message : 'Internal server error',
@@ -654,6 +769,31 @@ export async function taskRoutes(fastify: FastifyInstance, pool: Pool) {
         });
       } catch (error) {
         fastify.log.error(error);
+        
+        if (error instanceof ValidationError) {
+          return reply.code(400).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
+        if (error instanceof NotFoundError) {
+          return reply.code(404).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
+        if (error instanceof ForbiddenError) {
+          return reply.code(403).send({
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        
         return reply.code(500).send({
           success: false,
           error: error instanceof Error ? error.message : 'Internal server error',

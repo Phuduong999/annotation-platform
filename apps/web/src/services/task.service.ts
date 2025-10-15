@@ -24,6 +24,14 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 export class TaskService {
   private apiUrl = `${API_BASE_URL}`;
 
+  // Map API response to Task interface (scan_type -> type)
+  private mapApiTask(apiTask: any): Task {
+    return {
+      ...apiTask,
+      type: apiTask.scan_type || apiTask.type,
+    };
+  }
+
   async getTasks(filter?: TaskFilter): Promise<TaskListResponse> {
     const params = new URLSearchParams();
     
@@ -44,7 +52,7 @@ export class TaskService {
     if (response.data.data?.tasks) {
       const { tasks, pagination } = response.data.data;
       return {
-        tasks,
+        tasks: tasks.map((t: any) => this.mapApiTask(t)),
         pagination: {
           total: pagination?.total ?? tasks.length,
           limit: pagination?.limit ?? filter?.limit ?? tasks.length,
@@ -54,7 +62,7 @@ export class TaskService {
       };
     }
 
-    const fallbackTasks: Task[] = response.data.data || [];
+    const fallbackTasks: Task[] = (response.data.data || []).map((t: any) => this.mapApiTask(t));
     return {
       tasks: fallbackTasks,
       pagination: {
@@ -68,7 +76,7 @@ export class TaskService {
 
   async getTask(id: string): Promise<Task> {
     const response = await axios.get(`${this.apiUrl}/tasks/${id}`);
-    return response.data.data;
+    return this.mapApiTask(response.data.data);
   }
 
   async getTaskStats(): Promise<TaskStats> {
@@ -79,7 +87,7 @@ export class TaskService {
   async getNextTask(userId: string): Promise<Task | null> {
     try {
       const response = await axios.get(`${this.apiUrl}/tasks/next?user_id=${userId}`);
-      return response.data.data;
+      return this.mapApiTask(response.data.data);
     } catch (error: any) {
       if (error.response?.status === 404) {
         return null;
@@ -90,7 +98,7 @@ export class TaskService {
 
   async getUserTasks(userId: string): Promise<Task[]> {
     const response = await axios.get(`${this.apiUrl}/tasks/user/${userId}`);
-    return response.data.data;
+    return response.data.data.map((t: any) => this.mapApiTask(t));
   }
 
   // Helper to map TaskAnnotation to AnnotationRequest
@@ -107,19 +115,27 @@ export class TaskService {
   async saveTaskAnnotation(taskId: string, annotation: TaskAnnotation): Promise<Task> {
     const apiRequest = this.mapToAnnotationRequest(annotation);
     apiRequest.draft = true;
-    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/annotate`, apiRequest);
-    return response.data.data;
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/annotate`, apiRequest, {
+      headers: { 'x-user-id': 'user123' }
+    });
+    return this.mapApiTask(response.data.data);
   }
 
   async submitTask(taskId: string, annotation: TaskAnnotation): Promise<Task> {
     const apiRequest = this.mapToAnnotationRequest(annotation);
-    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/submit`, apiRequest);
-    return response.data.data;
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/submit`, apiRequest, {
+      headers: { 'x-user-id': 'user123' }
+    });
+    return this.mapApiTask(response.data.data);
   }
 
   async skipTask(taskId: string, reason?: string): Promise<Task> {
-    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/skip`, { reason });
-    return response.data.data;
+    const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/skip`, { 
+      user_id: 'user123',
+      reason_code: reason 
+    });
+    const data = response.data.data;
+    return this.mapApiTask(data.task);
   }
 
   // NEW ANNOTATION METHODS
@@ -128,13 +144,15 @@ export class TaskService {
     const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/start`, {
       user_id: userId,
     });
-    return response.data.data;
+    return this.mapApiTask(response.data.data);
   }
 
   async saveAnnotationDraft(taskId: string, annotation: AnnotationRequest): Promise<any> {
     const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/annotate`, {
       ...annotation,
       draft: true,
+    }, {
+      headers: { 'x-user-id': 'user123' }
     });
     return response.data.data;
   }
@@ -152,12 +170,16 @@ export class TaskService {
     const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/submit`, annotation, {
       headers,
     });
-    return response.data.data;
+    return this.mapApiTask(response.data.data);
   }
 
   async skipTaskNew(taskId: string, request: SkipTaskRequest): Promise<{ task: Task; nextTask?: Task }> {
     const response = await axios.put(`${this.apiUrl}/tasks/${taskId}/skip`, request);
-    return response.data.data;
+    const data = response.data.data;
+    return {
+      task: this.mapApiTask(data.task),
+      nextTask: data.nextTask ? this.mapApiTask(data.nextTask) : undefined,
+    };
   }
 
   // Auto-save draft with debouncing helper

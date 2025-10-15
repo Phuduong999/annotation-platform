@@ -22,7 +22,6 @@ import {
   Paper,
   ActionIcon,
 } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 import { useHotkeys, useDisclosure } from '@mantine/hooks';
 import {
   IconExternalLink,
@@ -43,28 +42,6 @@ interface AnnotationDrawerProps {
   onLoadNext?: () => void;
 }
 
-const ANNOTATION_GUIDE = [
-  {
-    type: 'Meal',
-    description: 'Prepared food items that require nutrition estimation (cooked dishes, restaurant meals, homemade food)',
-  },
-  {
-    type: 'Label',
-    description: 'Nutrition facts labels or text on packaging (ingredient lists, nutrition tables)',
-  },
-  {
-    type: 'Front Label',
-    description: 'Marketing claims or front-of-package text (product names, health claims, certifications)',
-  },
-  {
-    type: 'Screenshot',
-    description: 'Screen captures from apps or websites (recipe pages, delivery apps, menus)',
-  },
-  {
-    type: 'Others',
-    description: 'Any image not fitting above categories (unclear, non-food, corrupted)',
-  },
-];
 
 export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: AnnotationDrawerProps) {
   const navigate = useNavigate();
@@ -125,6 +102,8 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
   return (
     <>
       <Drawer
+        offset={8} 
+        radius="md"
         opened={opened}
         onClose={onClose}
         title={null}
@@ -142,7 +121,7 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
                   <Badge color={getTypeColor(task.type)}>{task.type}</Badge>
                   <Badge color={getStatusColor(task.status)}>{task.status}</Badge>
                 </Group>
-                <CopyButton value={task.request_id}>
+                {/* <CopyButton value={task.request_id}>
                   {({ copied, copy }) => (
                     <Tooltip label={copied ? 'Copied!' : 'Copy Request ID'}>
                       <Button
@@ -155,7 +134,7 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
                       </Button>
                     </Tooltip>
                   )}
-                </CopyButton>
+                </CopyButton> */}
               </Group>
               <Group gap="md">
                 <Text size="sm" c="dimmed">
@@ -264,41 +243,41 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
                       {aiSummary ? (
                         <>
                           {aiSummary.name_food && (
-                            <div>
+                            <Box>
                               <Text size="xs" c="dimmed">Food Name</Text>
                               <Text size="sm" fw={500}>{aiSummary.name_food}</Text>
-                            </div>
+                            </Box>
                           )}
                           {aiSummary.ingredients && (
-                            <div>
+                            <Box>
                               <Text size="xs" c="dimmed">Ingredients Count</Text>
                               <Text size="sm">
                                 {Array.isArray(aiSummary.ingredients) 
                                   ? aiSummary.ingredients.length 
                                   : Object.keys(aiSummary.ingredients || {}).length} items
                               </Text>
-                            </div>
+                            </Box>
                           )}
                           {aiSummary.calories && (
-                            <div>
+                            <Box>
                               <Text size="xs" c="dimmed">Calories</Text>
                               <Text size="sm" fw={500}>{aiSummary.calories} kcal</Text>
-                            </div>
+                            </Box>
                           )}
                           {aiSummary.total_fat && (
                             <Group gap="xl">
-                              <div>
+                              <Box>
                                 <Text size="xs" c="dimmed">Fat</Text>
                                 <Text size="sm">{aiSummary.total_fat}g</Text>
-                              </div>
-                              <div>
+                              </Box>
+                              <Box>
                                 <Text size="xs" c="dimmed">Protein</Text>
                                 <Text size="sm">{aiSummary.protein || 0}g</Text>
-                              </div>
-                              <div>
+                              </Box>
+                              <Box>
                                 <Text size="xs" c="dimmed">Carbs</Text>
                                 <Text size="sm">{aiSummary.carbohydrate || 0}g</Text>
-                              </div>
+                              </Box>
                             </Group>
                           )}
                         </>
@@ -362,20 +341,73 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
                     </Card>
                   )}
 
-                  {/* Current Label Summary (if annotated) */}
-                  {task.status === 'completed' && (
-                    <Card withBorder>
+                  {/* Current Annotation (if completed) */}
+                  {task.status === 'completed' && task.annotation && (
+                    <Card withBorder bg="green.0">
                       <Stack gap="xs">
-                        <Text size="sm" fw={500}>Current Annotation</Text>
-                        <Divider />
-                        <Group justify="space-between">
-                          <Text size="xs" c="dimmed">Annotated Type</Text>
-                          <Badge size="sm" color={getTypeColor(task.type)}>
-                            {task.type}
-                          </Badge>
+                        <Group gap="xs">
+                          <IconCheck size={16} />
+                          <Text size="sm" fw={500}>Annotation Results</Text>
                         </Group>
-                        <Alert icon={<IconInfoCircle />} color="blue" variant="light">
-                          This task has been annotated. Click "Take Action" to view or modify.
+                        <Divider />
+                        
+                        {/* Scan Type */}
+                        {task.annotation.scan_type && (
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Classification</Text>
+                            <Badge size="sm" color={getTypeColor(task.annotation.scan_type)}>
+                              {task.annotation.scan_type}
+                            </Badge>
+                          </Group>
+                        )}
+
+                        {/* Result Return */}
+                        {task.annotation.result_return && (
+                          <Group justify="space-between">
+                            <Text size="xs" c="dimmed">Result Return</Text>
+                            <Badge 
+                              size="sm" 
+                              color={task.annotation.result_return === 'correct_result' ? 'green' : 'red'}
+                            >
+                              {task.annotation.result_return === 'correct_result' ? 'Correct' : task.annotation.result_return === 'wrong_result' ? 'Wrong' : 'No Result'}
+                            </Badge>
+                          </Group>
+                        )}
+
+                        {/* Feedback Correction */}
+                        {task.annotation.feedback_correction && task.annotation.feedback_correction.length > 0 && (
+                          <Box>
+                            <Text size="xs" c="dimmed" mb={4}>Feedback Correction</Text>
+                            <Group gap={4}>
+                              {task.annotation.feedback_correction.map((correction: string, idx: number) => (
+                                <Badge key={idx} size="xs" variant="light">
+                                  {correction.replace(/_/g, ' ')}
+                                </Badge>
+                              ))}
+                            </Group>
+                          </Box>
+                        )}
+
+                        {/* Note */}
+                        {task.annotation.note && (
+                          <Box>
+                            <Text size="xs" c="dimmed">Note</Text>
+                            <Text size="xs">{task.annotation.note}</Text>
+                          </Box>
+                        )}
+
+                        {/* Annotated by */}
+                        {task.annotation.created_by && (
+                          <Box>
+                            <Text size="xs" c="dimmed">
+                              Annotated by {task.annotation.created_by} on{' '}
+                              {new Date(task.annotation.created_at).toLocaleString()}
+                            </Text>
+                          </Box>
+                        )}
+
+                        <Alert icon={<IconInfoCircle />} color="blue" variant="light" mt="xs">
+                          Click "Take Action" to view details or modify.
                         </Alert>
                       </Stack>
                     </Card>
@@ -383,6 +415,10 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
 
                   {/* End-user Feedback (Read-only) */}
                   {task.end_user_feedback && (
+                    task.end_user_feedback.reaction || 
+                    task.end_user_feedback.category || 
+                    task.end_user_feedback.note
+                  ) && (
                     <Card withBorder>
                       <Stack gap="xs">
                         <Text size="sm" fw={500}>End-User Feedback</Text>
@@ -415,7 +451,7 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
                   )}
 
                   {/* Annotation Guide */}
-                  <Card withBorder bg="blue.0">
+                  {/* <Card withBorder bg="blue.0">
                     <Stack gap="xs">
                       <Group gap="xs">
                         <IconInfoCircle size={16} />
@@ -423,17 +459,17 @@ export function AnnotationDrawer({ opened, onClose, task, tasks, onLoadNext }: A
                       </Group>
                       <Divider />
                       {ANNOTATION_GUIDE.map((guide) => (
-                        <div key={guide.type}>
+                        <Box key={guide.type}>
                           <Text size="xs" fw={600} c={guide.type === task.type ? 'blue' : 'dark'}>
                             {guide.type}
                           </Text>
                           <Text size="xs" c="dimmed">
                             {guide.description}
                           </Text>
-                        </div>
+                        </Box>
                       ))}
                     </Stack>
-                  </Card>
+                  </Card> */}
                 </Stack>
               </ScrollArea>
             </Grid.Col>

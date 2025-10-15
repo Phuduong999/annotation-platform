@@ -8,6 +8,7 @@ import {
   generateManifest,
   convertToCSV,
   convertToJSONL,
+  convertToExcel,
   streamCSV,
   streamJSONL,
   calculateStreamingChecksum,
@@ -107,18 +108,44 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
 
         const snapshot = snapshotResult.rows[0];
 
-        // Get finalized tasks
+        // Get completed tasks with final labels
         let taskQuery = `
-          SELECT t.*, r.result->>'classification' as classification,
-                 t.ai_confidence
+          SELECT t.*, 
+                 COALESCE(lf.scan_type, t.scan_type) as classification,
+                 COALESCE(lf.result_return, 'no_result_return') as result_return,
+                 t.ai_confidence,
+                 t.raw_ai_output as result
           FROM tasks t
-          LEFT JOIN reviews r ON r.task_id = t.id AND r.action = 'accept'
-          WHERE t.status = 'completed' 
-            AND t.review_status = 'accepted'
+          LEFT JOIN labels_final lf ON lf.task_id = t.id
+          WHERE t.status = 'completed'
         `;
 
         const taskResult = await client.query(taskQuery);
         const tasks = taskResult.rows;
+
+        // Check if there are any tasks
+        if (tasks.length === 0) {
+          // Update snapshot status to completed (empty snapshot)
+          await client.query(
+            `UPDATE snapshots SET status = 'completed', total_items = 0 WHERE id = $1`,
+            [snapshot.id]
+          );
+
+          await client.query('COMMIT');
+
+          return reply.code(201).send({
+            success: true,
+            data: {
+              ...snapshot,
+              total_items: 0,
+              train_count: 0,
+              validation_count: 0,
+              test_count: 0,
+              message: 'Snapshot created successfully with no tasks (empty dataset)',
+            },
+            timestamp: new Date().toISOString(),
+          });
+        }
 
         // Perform stratified splitting
         const splitAssignments = stratifiedSplit(
@@ -136,13 +163,16 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
 
           const itemData = {
             id: task.id,
-            classification: task.classification || task.type,
-            tags: task.result?.tags || [],
-            confidence: task.ai_confidence,
             request_id: task.request_id,
+            classification: task.classification || task.scan_type,
+            result_return: task.result_return,
+            confidence: task.ai_confidence,
             team_id: task.team_id,
+            user_id: task.user_id,
             scan_date: task.scan_date,
             user_input: task.user_input,
+            raw_ai_output: task.result,
+            scan_subtype: task.scan_subtype,
           };
 
           const itemChecksum = generateChecksum(JSON.stringify(itemData));
@@ -217,6 +247,9 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
           [dataChecksum.rows[0].checksum, manifestChecksum, snapshot.id]
         );
 
+        // Update snapshot counts
+        await client.query('SELECT update_snapshot_counts($1)', [snapshot.id]);
+
         await client.query('COMMIT');
 
         return reply.code(201).send({
@@ -251,7 +284,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
           required: ['snapshot'],
           properties: {
             snapshot: { type: 'string' },
-            format: { type: 'string', enum: ['csv', 'json', 'jsonl'] },
+            format: { type: 'string', enum: ['csv', 'json', 'jsonl', 'xlsx'] },
             split: { type: 'string', enum: ['train', 'validation', 'test', 'all'] },
           },
         },
@@ -261,7 +294,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
       request: FastifyRequest<{
         Querystring: {
           snapshot: string;
-          format?: 'csv' | 'json' | 'jsonl';
+          format?: 'csv' | 'json' | 'jsonl' | 'xlsx';
           split?: 'train' | 'validation' | 'test' | 'all';
         };
       }>,
@@ -272,7 +305,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
 
         // Get snapshot
         const snapshotResult = await pool.query(
-          `SELECT * FROM snapshots WHERE version_id = $1 OR id = $1`,
+          `SELECT * FROM snapshots WHERE version_id = $1 OR id = $1::uuid`,
           [snapshot]
         );
 
@@ -307,7 +340,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
           split: row.split,
         }));
 
-        let output: string;
+        let output: string | Buffer;
         let contentType: string;
         let filename: string;
 
@@ -323,6 +356,11 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
             contentType = 'application/x-ndjson';
             filename = `${snapshotData.version_id}-${split}.jsonl`;
             break;
+          case 'xlsx':
+            output = convertToExcel(items);
+            contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+            filename = `${snapshotData.version_id}-${split}.xlsx`;
+            break;
           default:
             output = JSON.stringify(items, null, 2);
             contentType = 'application/json';
@@ -330,7 +368,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
         }
 
         // Generate checksum for this export
-        const exportChecksum = generateChecksum(output);
+        const exportChecksum = generateChecksum(typeof output === 'string' ? output : output.toString('base64'));
 
         // Record export
         await pool.query(
@@ -433,9 +471,146 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
 
         const result = await pool.query(query, params);
 
+        // Get total count
+        let countQuery = `
+          SELECT COUNT(*) as total
+          FROM snapshots s
+          WHERE 1=1
+        `;
+        const countParams: any[] = [];
+        if (status) {
+          countQuery += ` AND s.status = $${countParams.length + 1}`;
+          countParams.push(status);
+        }
+        if (is_published !== undefined) {
+          countQuery += ` AND s.is_published = $${countParams.length + 1}`;
+          countParams.push(is_published);
+        }
+        if (is_archived !== undefined) {
+          countQuery += ` AND s.is_archived = $${countParams.length + 1}`;
+          countParams.push(is_archived);
+        }
+        const countResult = await pool.query(countQuery, countParams);
+        const total = parseInt(countResult.rows[0].total);
+
         return reply.code(200).send({
           success: true,
-          data: result.rows,
+          data: {
+            snapshots: result.rows,
+            total,
+            limit,
+            offset
+          },
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        fastify.log.error(error);
+        return reply.code(500).send({
+          success: false,
+          error: error instanceof Error ? error.message : 'Internal server error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  );
+
+  // GET /exports/list - List all exports
+  fastify.get(
+    '/exports/list',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          properties: {
+            snapshot_id: { type: 'string' },
+            format: { type: 'string' },
+            status: { type: 'string' },
+            limit: { type: 'number' },
+            offset: { type: 'number' },
+          },
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Querystring: {
+          snapshot_id?: string;
+          format?: string;
+          status?: string;
+          limit?: number;
+          offset?: number;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const {
+          snapshot_id,
+          format,
+          status,
+          limit = 20,
+          offset = 0,
+        } = request.query;
+
+        let query = `
+          SELECT e.*, s.name as snapshot_name, s.version_id as snapshot_version
+          FROM exports e
+          LEFT JOIN snapshots s ON s.id = e.snapshot_id
+          WHERE 1=1
+        `;
+        const params: any[] = [];
+
+        if (snapshot_id) {
+          query += ` AND e.snapshot_id = $${params.length + 1}`;
+          params.push(snapshot_id);
+        }
+
+        if (format) {
+          query += ` AND e.format = $${params.length + 1}`;
+          params.push(format);
+        }
+
+        if (status) {
+          query += ` AND e.status = $${params.length + 1}`;
+          params.push(status);
+        }
+
+        query += ` ORDER BY e.created_at DESC`;
+        query += ` LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        params.push(limit, offset);
+
+        const result = await pool.query(query, params);
+
+        // Get total count
+        let countQuery = `
+          SELECT COUNT(*) as total
+          FROM exports e
+          WHERE 1=1
+        `;
+        const countParams: any[] = [];
+        if (snapshot_id) {
+          countQuery += ` AND e.snapshot_id = $${countParams.length + 1}`;
+          countParams.push(snapshot_id);
+        }
+        if (format) {
+          countQuery += ` AND e.format = $${countParams.length + 1}`;
+          countParams.push(format);
+        }
+        if (status) {
+          countQuery += ` AND e.status = $${countParams.length + 1}`;
+          countParams.push(status);
+        }
+        const countResult = await pool.query(countQuery, countParams);
+        const total = parseInt(countResult.rows[0].total);
+
+        return reply.code(200).send({
+          success: true,
+          data: {
+            exports: result.rows,
+            total,
+            limit,
+            offset
+          },
           timestamp: new Date().toISOString(),
         });
       } catch (error) {
@@ -478,7 +653,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
           `SELECT em.*, s.version_id, s.name, s.description
            FROM export_manifests em
            JOIN snapshots s ON s.id = em.snapshot_id
-           WHERE s.id = $1 OR s.version_id = $1`,
+           WHERE s.id = $1::uuid OR s.version_id = $1`,
           [snapshotId]
         );
 
@@ -534,7 +709,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
         const result = await pool.query(
           `UPDATE snapshots 
            SET is_published = true, published_at = NOW()
-           WHERE id = $1 OR version_id = $1
+           WHERE id = $1::uuid OR version_id = $1
            RETURNING *`,
           [id]
         );
@@ -573,7 +748,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
           required: ['snapshot'],
           properties: {
             snapshot: { type: 'string' },
-            format: { type: 'string', enum: ['csv', 'jsonl'] },
+            format: { type: 'string', enum: ['csv', 'jsonl', 'xlsx'] },
             split: { type: 'string', enum: ['train', 'validation', 'test', 'all'] },
           },
         },
@@ -583,7 +758,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
       request: FastifyRequest<{
         Querystring: {
           snapshot: string;
-          format?: 'csv' | 'jsonl';
+          format?: 'csv' | 'jsonl' | 'xlsx';
           split?: 'train' | 'validation' | 'test' | 'all';
         };
       }>,
@@ -594,7 +769,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
 
         // Get snapshot
         const snapshotResult = await pool.query(
-          `SELECT * FROM snapshots WHERE version_id = $1 OR id = $1`,
+          `SELECT * FROM snapshots WHERE version_id = $1 OR id = $1::uuid`,
           [snapshot]
         );
 
@@ -615,7 +790,59 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
           split !== 'all' ? split : undefined
         );
 
-        // Set response headers
+        // Handle Excel format (non-streaming)
+        if (format === 'xlsx') {
+          // Get all items for Excel export (Excel can't be streamed)
+          let itemsQuery = `
+            SELECT data, split, split_index 
+            FROM snapshot_items 
+            WHERE snapshot_id = $1
+          `;
+          const params = [snapshotData.id];
+
+          if (split !== 'all') {
+            itemsQuery += ` AND split = $2`;
+            params.push(split);
+          }
+
+          itemsQuery += ` ORDER BY split, split_index`;
+
+          const itemsResult = await pool.query(itemsQuery, params);
+          const items = itemsResult.rows.map(row => ({
+            ...row.data,
+            split: row.split,
+          }));
+
+          const excelBuffer = convertToExcel(items);
+          const filename = `${snapshotData.version_id}-${split}.xlsx`;
+
+          // Set response headers
+          reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+          reply.header('X-Checksum', exportChecksum);
+          reply.header('X-Version', snapshotData.version_id);
+          reply.header('ETag', `"${exportChecksum}"`);
+          reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+          reply.header('X-Snapshot-Immutable', 'true');
+          reply.header('X-Split-Seed', snapshotData.split_seed.toString());
+
+          // Record export (async, don't wait)
+          pool.query(
+            `INSERT INTO exports 
+             (snapshot_id, format, split, file_checksum, status, created_by)
+             VALUES ($1, $2, $3, $4, 'completed', 'system')`,
+            [
+              snapshotData.id,
+              format,
+              split === 'all' ? null : split,
+              exportChecksum,
+            ]
+          ).catch(err => fastify.log.error('Failed to record export:', err));
+
+          return reply.send(excelBuffer);
+        }
+
+        // Set response headers for streaming formats
         const contentType = format === 'csv' ? 'text/csv' : 'application/x-ndjson';
         const filename = `${snapshotData.version_id}-${split}.${format}`;
 
@@ -848,7 +1075,7 @@ export async function exportRoutes(fastify: FastifyInstance, pool: Pool) {
                   COUNT(CASE WHEN si.split = 'test' THEN 1 END) as test_count
            FROM snapshots s
            LEFT JOIN snapshot_items si ON si.snapshot_id = s.id
-           WHERE s.id = $1 OR s.version_id = $1
+           WHERE s.id = $1::uuid OR s.version_id = $1
            GROUP BY s.id`,
           [id]
         );

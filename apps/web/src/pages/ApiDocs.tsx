@@ -98,17 +98,55 @@ const apiRoutes: ApiRoute[] = [
     category: 'Tasks',
   },
 
-  // Feedback
+  // Task Annotation Endpoints (NEW)
+  {
+    method: 'PUT',
+    path: '/tasks/:id/start',
+    description: 'Start working on a task (auto-assigns if pending)',
+    category: 'Tasks',
+  },
+  {
+    method: 'PUT',
+    path: '/tasks/:id/annotate',
+    description: 'Save draft annotation with 3-enum validation',
+    category: 'Tasks',
+  },
+  {
+    method: 'PUT',
+    path: '/tasks/:id/submit',
+    description: 'Submit final annotation (completes task)',
+    category: 'Tasks',
+  },
+  {
+    method: 'PUT',
+    path: '/tasks/:id/skip',
+    description: 'Skip task with reason (returns to queue)',
+    category: 'Tasks',
+  },
+
+  // Feedback Events
   {
     method: 'POST',
-    path: '/feedback/events',
-    description: 'Record end-user feedback event',
+    path: '/events/feedback',
+    description: 'Record end-user feedback event (with idempotency support)',
     category: 'Feedback',
   },
   {
     method: 'GET',
-    path: '/feedback/events/:requestId',
+    path: '/events/feedback',
+    description: 'List feedback events with pagination and filters',
+    category: 'Feedback',
+  },
+  {
+    method: 'GET',
+    path: '/events/feedback/:requestId',
     description: 'Get feedback events for a specific request',
+    category: 'Feedback',
+  },
+  {
+    method: 'GET',
+    path: '/feedback/categories',
+    description: 'Get unique feedback categories with counts',
     category: 'Feedback',
   },
   {
@@ -167,26 +205,32 @@ const apiRoutes: ApiRoute[] = [
   // Export & Snapshots
   {
     method: 'POST',
-    path: '/export/snapshots',
-    description: 'Create a new export snapshot',
+    path: '/snapshots',
+    description: 'Create a new export snapshot with stratified splitting',
     category: 'Export',
   },
   {
     method: 'GET',
-    path: '/export/snapshots',
-    description: 'List all export snapshots',
-    category: 'Export',
-  },
-  {
-    method: 'GET',
-    path: '/export/snapshots/:snapshotId',
-    description: 'Get snapshot details',
+    path: '/snapshots',
+    description: 'List all export snapshots with filtering',
     category: 'Export',
   },
   {
     method: 'POST',
-    path: '/export/snapshots/:snapshotId/download',
-    description: 'Download snapshot as CSV',
+    path: '/snapshots/:id/publish',
+    description: 'Publish a snapshot for external access',
+    category: 'Export',
+  },
+  {
+    method: 'GET',
+    path: '/exports',
+    description: 'Export snapshot data in CSV/JSON/JSONL format',
+    category: 'Export',
+  },
+  {
+    method: 'GET',
+    path: '/exports/manifest/:snapshotId',
+    description: 'Get export manifest with ontology and metadata',
     category: 'Export',
   },
 
@@ -334,6 +378,166 @@ export function ApiDocs() {
   "error": "Error message if failed",
   "timestamp": "2025-10-09T18:00:00.000Z"
 }`}</Code>
+          </Stack>
+        </Paper>
+
+        <Paper withBorder p="md">
+          <Stack gap="md">
+            <Text size="sm" fw={500}>
+              Feedback API Examples
+            </Text>
+            
+            <div>
+              <Text size="xs" fw={500}>POST /events/feedback - Submit Feedback</Text>
+              <Text size="xs" c="dimmed" mb="xs">
+                Submit feedback with idempotency support. Use Idempotency-Key header to prevent duplicates.
+              </Text>
+              <Code block>{`# Headers
+Content-Type: application/json
+Idempotency-Key: feedback-req123-20241010-001  # Optional
+
+# Request Body
+{
+  "request_id": "req_123456789",
+  "user_event_id": "user_evt_001",  # Optional
+  "reaction": "like",
+  "category": "accuracy",
+  "note": "Great food detection!",
+  "source": "mobile_app"
+}
+
+# Success Response (201)
+{
+  "success": true,
+  "data": {
+    "id": "fb_uuid_123",
+    "request_id": "req_123456789",
+    "user_event_id": "user_evt_001",
+    "reaction": "like",
+    "category": "accuracy",
+    "note": "Great food detection!",
+    "source": "mobile_app",
+    "created_at": "2024-10-10T10:30:00Z",
+    "idempotency_key": "feedback-req123-20241010-001"
+  },
+  "timestamp": "2024-10-10T10:30:00Z"
+}
+
+# Duplicate Feedback (409)
+{
+  "success": false,
+  "error": "Feedback already exists for this request",
+  "error_code": "DUPLICATE_FEEDBACK",
+  "details": "A feedback event already exists for this request_id and user_event_id combination",
+  "timestamp": "2024-10-10T10:30:01Z"
+}`}</Code>
+            </div>
+            
+            <div>
+              <Text size="xs" fw={500}>GET /events/feedback - List with Pagination & Filters</Text>
+              <Text size="xs" c="dimmed" mb="xs">
+                List feedback events with comprehensive filtering and pagination.
+              </Text>
+              <Code block>{`# Query Parameters
+GET /events/feedback?reaction=like&category=accuracy&limit=50&offset=0
+
+# Response
+{
+  "success": true,
+  "data": {
+    "events": [
+      {
+        "id": "fb_uuid_123",
+        "request_id": "req_123456789",
+        "user_event_id": "user_evt_001",
+        "reaction": "like",
+        "category": "accuracy",
+        "note": "Great food detection!",
+        "source": "mobile_app",
+        "created_at": "2024-10-10T10:30:00Z",
+        "idempotency_key": "feedback-req123-20241010-001"
+      }
+    ],
+    "total": 1,
+    "limit": 50,
+    "offset": 0,
+    "has_more": false
+  },
+  "timestamp": "2024-10-10T10:30:00Z"
+}
+
+# Available Filters:
+# - request_id: Filter by specific request
+# - reaction: like|dislike|neutral
+# - category: Filter by category (partial match)
+# - source: Filter by source system
+# - from_date: ISO date string (>=)
+# - to_date: ISO date string (<=)
+# - limit: 1-1000, default 100
+# - offset: 0+, default 0`}</Code>
+            </div>
+          </Stack>
+        </Paper>
+        
+        <Paper withBorder p="md">
+          <Stack gap="xs">
+            <Text size="sm" fw={500}>
+              Enum Values
+            </Text>
+            <Text size="xs" c="dimmed">
+              System uses the following standardized enum values:
+            </Text>
+            <Stack gap="sm">
+              <div>
+                <Text size="xs" fw={500}>Scan Types:</Text>
+                <Code>meal | label | front_label | screenshot | others</Code>
+              </div>
+              <div>
+                <Text size="xs" fw={500}>Feedback Reactions:</Text>
+                <Code>like | dislike | neutral</Code>
+              </div>
+              <div>
+                <Text size="xs" fw={500}>Result Return:</Text>
+                <Code>correct_result | wrong_result | no_result</Code>
+              </div>
+              <div>
+                <Text size="xs" fw={500}>Feedback Correction:</Text>
+                <Code>wrong_food | incorrect_nutrition | incorrect_ingredients | wrong_portion_size</Code>
+              </div>
+              <div>
+                <Text size="xs" fw={500}>Task Status:</Text>
+                <Code>pending | assigned | in_progress | completed | skipped</Code>
+              </div>
+            </Stack>
+          </Stack>
+        </Paper>
+        
+        <Paper withBorder p="md">
+          <Stack gap="xs">
+            <Text size="sm" fw={500}>
+              Error Codes
+            </Text>
+            <Text size="xs" c="dimmed">
+              Common error codes and their meanings:
+            </Text>
+            <Stack gap="sm">
+              <div>
+                <Text size="xs" fw={500}>409 DUPLICATE_FEEDBACK:</Text>
+                <Text size="xs" c="dimmed">Feedback already exists for request_id + user_event_id combination</Text>
+              </div>
+              <div>
+                <Text size="xs" fw={500}>409 DUPLICATE_IDEMPOTENCY_KEY:</Text>
+                <Text size="xs" c="dimmed">The idempotency key has already been used</Text>
+              </div>
+              <div>
+                <Text size="xs" fw={500}>400 VALIDATION_ERROR:</Text>
+                <Text size="xs" c="dimmed">Request body validation failed</Text>
+              </div>
+              <div>
+                <Text size="xs" fw={500}>404 NOT_FOUND:</Text>
+                <Text size="xs" c="dimmed">Requested resource not found</Text>
+              </div>
+            </Stack>
           </Stack>
         </Paper>
       </Stack>

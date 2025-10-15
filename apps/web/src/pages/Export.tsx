@@ -1,10 +1,12 @@
-import { Container, Title, Text, Stack, Button, Card, Group, Badge, Table, ActionIcon, Select, TextInput, NumberInput, Textarea, Modal, Grid, Progress, Tooltip } from '@mantine/core';
-import { IconDownload, IconPlus, IconEye, IconTrash, IconRefresh, IconFileText, IconDatabase, IconCheck, IconX } from '@tabler/icons-react';
+import { Container, Title, Text, Stack, Button, Card, Group, Badge, Table, ActionIcon, Select, TextInput, NumberInput, Textarea, Modal, Grid, Progress, Tooltip, Menu } from '@mantine/core';
+import { IconDownload, IconPlus, IconEye, IconTrash, IconRefresh, IconFileText, IconDatabase, IconCheck, IconX, IconFileTypeCsv, IconBraces, IconTable, IconFileSpreadsheet } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
 import { notifications } from '@mantine/notifications';
 import { snapshotService } from '../services/snapshot.service';
 import { exportService } from '../services/export.service';
-import { Snapshot, CreateSnapshotRequest, Export as ExportType, ExportFormat, DataSplit } from '../types/snapshot.types';
+import { Snapshot, 
+  CreateSnapshotRequest, 
+  Export as ExportType, ExportFormat, DataSplit } from '../types/snapshot.types';
 
 
 export function Export() {
@@ -13,7 +15,6 @@ export function Export() {
   const [loading, setLoading] = useState(false);
   const [createSnapshotModalOpen, setCreateSnapshotModalOpen] = useState(false);
   const [createExportModalOpen, setCreateExportModalOpen] = useState(false);
-  const [selectedSnapshotId, setSelectedSnapshotId] = useState<string>('');
   
   // Create snapshot form stoiate
   const [snapshotForm, setSnapshotForm] = useState<CreateSnapshotRequest>({
@@ -136,6 +137,31 @@ export function Export() {
     }
   };
 
+  const handleQuickDownload = async (snapshotId: string, format: ExportFormat, split: DataSplit = 'all') => {
+    try {
+      notifications.show({
+        title: 'Download Started',
+        message: `Downloading ${format.toUpperCase()} export...`,
+        color: 'blue',
+        autoClose: 2000,
+      });
+      
+      await exportService.downloadDirectExport(snapshotId, format, split);
+      
+      notifications.show({
+        title: 'Download Complete',
+        message: `${format.toUpperCase()} file downloaded successfully`,
+        color: 'green',
+      });
+    } catch (error) {
+      notifications.show({
+        title: 'Download Failed',
+        message: `Failed to download ${format.toUpperCase()} file`,
+        color: 'red',
+      });
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const colors = {
       pending: 'blue',
@@ -156,6 +182,46 @@ export function Export() {
             Create data snapshots and export task data in various formats
           </Text>
         </div>
+
+        {/* Export Format Info */}
+        <Card withBorder bg="blue.0">
+          <Stack gap="xs">
+            <Group gap="xs">
+              <IconFileText size={18} />
+              <Text size="sm" fw={500}>Available Export Formats</Text>
+            </Group>
+            <Grid>
+              <Grid.Col span={3}>
+                <Group gap={4}>
+                  <IconFileTypeCsv size={16} />
+                  <Text size="xs" fw={500}>CSV</Text>
+                </Group>
+                <Text size="xs" c="dimmed">Comma-separated values, Excel compatible</Text>
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Group gap={4}>
+                  <IconBraces size={16} />
+                  <Text size="xs" fw={500}>JSON</Text>
+                </Group>
+                <Text size="xs" c="dimmed">Structured data format, human-readable</Text>
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Group gap={4}>
+                  <IconFileText size={16} />
+                  <Text size="xs" fw={500}>JSONL</Text>
+                </Group>
+                <Text size="xs" c="dimmed">JSON Lines, one object per line</Text>
+              </Grid.Col>
+              <Grid.Col span={3}>
+                <Group gap={4}>
+                  <IconFileSpreadsheet size={16} />
+                  <Text size="xs" fw={500}>Excel (XLSX)</Text>
+                </Group>
+                <Text size="xs" c="dimmed">Microsoft Excel spreadsheet format</Text>
+              </Grid.Col>
+            </Grid>
+          </Stack>
+        </Card>
 
         {/* Snapshots Section */}
         <Card withBorder>
@@ -218,19 +284,50 @@ export function Export() {
                     </Table.Td>
                     <Table.Td>
                       <Group gap={4}>
-                        <Tooltip label="Create Export">
-                          <ActionIcon 
-                            variant="light" 
-                            size="sm" 
-                            onClick={() => {
-                              setSelectedSnapshotId(snapshot.id);
-                              setExportForm(prev => ({ ...prev, snapshot_id: snapshot.id }));
-                              setCreateExportModalOpen(true);
-                            }}
-                          >
-                            <IconDownload size={14} />
-                          </ActionIcon>
-                        </Tooltip>
+                        <Menu shadow="md" width={200}>
+                          <Menu.Target>
+                            <ActionIcon variant="light" size="sm">
+                              <IconDownload size={14} />
+                            </ActionIcon>
+                          </Menu.Target>
+                          <Menu.Dropdown>
+                            <Menu.Label>Quick Download</Menu.Label>
+                            <Menu.Item 
+                              leftSection={<IconFileTypeCsv size={14} />}
+                              onClick={() => handleQuickDownload(snapshot.id, 'csv', 'all')}
+                            >
+                              Download as CSV
+                            </Menu.Item>
+                            <Menu.Item 
+                              leftSection={<IconBraces size={14} />}
+                              onClick={() => handleQuickDownload(snapshot.id, 'json', 'all')}
+                            >
+                              Download as JSON
+                            </Menu.Item>
+                            <Menu.Item 
+                              leftSection={<IconFileText size={14} />}
+                              onClick={() => handleQuickDownload(snapshot.id, 'jsonl', 'all')}
+                            >
+                              Download as JSONL
+                            </Menu.Item>
+                            <Menu.Item 
+                              leftSection={<IconFileSpreadsheet size={14} />}
+                              onClick={() => handleQuickDownload(snapshot.id, 'xlsx', 'all')}
+                            >
+                              Download as Excel
+                            </Menu.Item>
+                            <Menu.Divider />
+                            <Menu.Item 
+                              leftSection={<IconPlus size={14} />}
+                              onClick={() => {
+                                setExportForm(prev => ({ ...prev, snapshot_id: snapshot.id }));
+                                setCreateExportModalOpen(true);
+                              }}
+                            >
+                              Custom Export...
+                            </Menu.Item>
+                          </Menu.Dropdown>
+                        </Menu>
                       </Group>
                     </Table.Td>
                   </Table.Tr>
@@ -431,10 +528,10 @@ export function Export() {
           <Select
             label="Format"
             data={[
-              { value: 'csv', label: 'CSV' },
-              { value: 'json', label: 'JSON' },
-              { value: 'jsonl', label: 'JSON Lines' },
-              { value: 'parquet', label: 'Parquet' }
+              { value: 'csv', label: 'CSV - Comma Separated Values' },
+              { value: 'json', label: 'JSON - JavaScript Object Notation' },
+              { value: 'jsonl', label: 'JSONL - JSON Lines (one object per line)' },
+              { value: 'xlsx', label: 'Excel - Microsoft Excel Spreadsheet' }
             ]}
             value={exportForm.format}
             onChange={(val) => setExportForm(prev => ({ ...prev, format: val as ExportFormat || 'csv' }))}
@@ -442,15 +539,15 @@ export function Export() {
           
           <Select
             label="Data Split"
-            placeholder="All splits (leave empty for full dataset)"
+            placeholder="Select data split"
             data={[
+              { value: 'all', label: 'All Data (Complete Dataset)' },
               { value: 'train', label: 'Training Set' },
               { value: 'validation', label: 'Validation Set' },
               { value: 'test', label: 'Test Set' }
             ]}
-            value={exportForm.split}
-            onChange={(val) => setExportForm(prev => ({ ...prev, split: val as DataSplit || undefined }))}
-            clearable
+            value={exportForm.split || 'all'}
+            onChange={(val) => setExportForm(prev => ({ ...prev, split: val as DataSplit || 'all' }))}
           />
           
           <Group justify="flex-end">

@@ -6,8 +6,8 @@ import {
   AnnotationRequest,
   TaskWithAnnotations,
   LabelsDraft,
-  LabelsFinal,
 } from '../types/annotation.types.js';
+import { ValidationError, NotFoundError, ForbiddenError } from '../utils/errors.js';
 
 export interface TaskCreationResult {
   totalRows: number;
@@ -144,12 +144,13 @@ export class TaskService {
 
         // Create task with proper field mapping (including extended fields)
         // Assign to specified user if provided, otherwise leave unassigned
-        await this.pool.query(
+        const taskResult = await this.pool.query(
           `INSERT INTO tasks 
            (import_row_id, request_id, user_id, team_id, scan_type, user_input, raw_ai_output, 
             ai_confidence, scan_date, status, assigned_to, user_email, user_full_name, user_log, 
             raw_user_log, is_logged, edit_category, ai_output_log)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $12, $13, $14, $15, $16, $17)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $12, $13, $14, $15, $16, $17)
+           RETURNING id`,
           [
             row.id,                                                      // $1: import_row_id
             requestId,                                                   // $2: request_id
@@ -170,6 +171,43 @@ export class TaskService {
             rowData.ai_output_log || null,                              // $17: ai_output_log
           ]
         );
+
+        const taskId = taskResult.rows[0].id;
+
+        // If this row has label annotation data, create labels_final record
+        if (rowData.label_scan_type && rowData.label_result_return) {
+          try {
+            let feedbackCorrection = null;
+            if (rowData.label_feedback_correction) {
+              feedbackCorrection = JSON.parse(rowData.label_feedback_correction);
+            }
+
+            await this.pool.query(
+              `INSERT INTO labels_final 
+               (task_id, scan_type, result_return, feedback_correction, note, created_by)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [
+                taskId,
+                rowData.label_scan_type,
+                rowData.label_result_return,
+                feedbackCorrection,
+                rowData.label_note || null,
+                'import_system',
+              ]
+            );
+
+            // Update task status to completed if it has labels
+            await this.pool.query(
+              `UPDATE tasks 
+               SET status = 'completed', completed_at = NOW()
+               WHERE id = $1`,
+              [taskId]
+            );
+          } catch (labelError) {
+            console.error(`Error creating label for task ${taskId}:`, labelError);
+            // Continue - don't fail task creation if label creation fails
+          }
+        }
 
         result.tasksCreated++;
       } catch (error) {
@@ -313,27 +351,24 @@ export class TaskService {
   async getTaskStats() {
     const stats = await this.pool.query(
       `SELECT 
-         COUNT(*) FILTER (WHERE status = 'pending' AND assigned_to IS NULL) as unassigned,
-         COUNT(*) FILTER (WHERE status = 'assigned') as assigned,
+         COUNT(*) FILTER (WHERE status = 'pending') as pending,
+         COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
          COUNT(*) FILTER (WHERE status = 'completed') as completed,
-         COUNT(*) FILTER (WHERE status = 'processing') as processing,
+         COUNT(*) FILTER (WHERE status = 'failed') as failed,
+         COUNT(*) FILTER (WHERE status = 'skipped') as skipped,
+         COUNT(*) FILTER (WHERE assigned_to IS NULL) as unassigned,
          COUNT(*) as total
        FROM tasks`
     );
 
-    const assignmentStats = await this.pool.query(
-      `SELECT 
-         assigned_to,
-         COUNT(*) as task_count,
-         assignment_method
-       FROM task_assignments
-       GROUP BY assigned_to, assignment_method
-       ORDER BY task_count DESC`
-    );
-
     return {
-      taskCounts: stats.rows[0],
-      assignments: assignmentStats.rows,
+      total: parseInt(stats.rows[0].total),
+      pending: parseInt(stats.rows[0].pending),
+      in_progress: parseInt(stats.rows[0].in_progress),
+      completed: parseInt(stats.rows[0].completed),
+      failed: parseInt(stats.rows[0].failed),
+      skipped: parseInt(stats.rows[0].skipped),
+      unassigned: parseInt(stats.rows[0].unassigned),
     };
   }
 
@@ -399,7 +434,11 @@ export class TaskService {
 
       // Get task with current status (lock only the tasks table)
       const taskResult = await client.query(
-        `SELECT t.*, ld.payload as draft_payload, lf.* as final_data
+        `SELECT t.*, 
+         ld.id as draft_id, ld.payload as draft_payload, ld.updated_by as draft_updated_by, ld.updated_at as draft_updated_at,
+         lf.id as final_id, lf.scan_type as final_scan_type, lf.result_return as final_result_return, 
+         lf.feedback_correction as final_feedback_correction, lf.note as final_note, 
+         lf.created_by as final_created_by, lf.created_at as final_created_at
          FROM tasks t
          LEFT JOIN labels_draft ld ON ld.task_id = t.id
          LEFT JOIN labels_final lf ON lf.task_id = t.id
@@ -534,7 +573,11 @@ export class TaskService {
         if (existingResult.rows.length > 0) {
           // Already submitted with this key, return existing result
           const taskResult = await client.query(
-            `SELECT t.*, ld.payload as draft_payload, lf.* as final_data
+            `SELECT t.*, 
+             ld.id as draft_id, ld.payload as draft_payload, ld.updated_by as draft_updated_by, ld.updated_at as draft_updated_at,
+             lf.id as final_id, lf.scan_type as final_scan_type, lf.result_return as final_result_return, 
+             lf.feedback_correction as final_feedback_correction, lf.note as final_note, 
+             lf.created_by as final_created_by, lf.created_at as final_created_at
              FROM tasks t
              LEFT JOIN labels_draft ld ON ld.task_id = t.id
              LEFT JOIN labels_final lf ON lf.task_id = t.id
@@ -547,12 +590,31 @@ export class TaskService {
         }
       }
 
-      // Verify task is in progress by this user
-      const task = await this.verifyTaskOwnership(client, taskId, userId);
+      // Get task and verify ownership (allow both in_progress and completed for re-submission)
+      const taskResult = await client.query(
+        `SELECT * FROM tasks WHERE id = $1`,
+        [taskId]
+      );
 
-      // Calculate duration
-      let durationMs: number | null = null;
-      if (task.started_at) {
+      if (taskResult.rows.length === 0) {
+        throw new NotFoundError('Task not found');
+      }
+
+      const task = taskResult.rows[0];
+
+      // Verify ownership
+      if (task.assigned_to !== userId) {
+        throw new ForbiddenError('Task is not assigned to this user');
+      }
+
+      // Allow only in_progress or completed status
+      if (task.status !== 'in_progress' && task.status !== 'completed') {
+        throw new ValidationError(`Cannot submit task with status: ${task.status}. Task must be in progress or completed.`);
+      }
+
+      // Calculate duration (only for first submission)
+      let durationMs: number | null = task.duration_ms; // Keep existing duration for re-submissions
+      if (task.status === 'in_progress' && task.started_at) {
         durationMs = Date.now() - new Date(task.started_at).getTime();
       }
 
@@ -579,10 +641,13 @@ export class TaskService {
         ]
       );
 
-      // Update task status to completed
-      const taskResult = await client.query(
+      // Update task status to completed (preserve completed_at if already set)
+      const updateTaskResult = await client.query(
         `UPDATE tasks 
-         SET status = 'completed', completed_at = NOW(), duration_ms = $1, updated_at = NOW()
+         SET status = 'completed', 
+             completed_at = COALESCE(completed_at, NOW()), 
+             duration_ms = $1, 
+             updated_at = NOW()
          WHERE id = $2
          RETURNING *`,
         [durationMs, taskId]
@@ -599,10 +664,11 @@ export class TaskService {
         ...annotation,
         duration_ms: durationMs,
         idempotency_key: idempotencyKey,
+        is_resubmission: task.status === 'completed',
       });
 
       await client.query('COMMIT');
-      return this.buildTaskWithAnnotations(taskResult.rows[0]);
+      return this.buildTaskWithAnnotations(updateTaskResult.rows[0]);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -699,18 +765,18 @@ export class TaskService {
     );
 
     if (result.rows.length === 0) {
-      throw new Error('Task not found');
+      throw new NotFoundError('Task not found');
     }
 
     const task = result.rows[0];
 
     if (requireOwnership) {
       if (task.status !== 'in_progress') {
-        throw new Error(`Task must be in progress to perform this action. Current status: ${task.status}`);
+        throw new ValidationError(`Task must be in progress to perform this action. Current status: ${task.status}`);
       }
 
       if (task.assigned_to !== userId) {
-        throw new Error('Task is not assigned to this user');
+        throw new ForbiddenError('Task is not assigned to this user');
       }
     }
 
@@ -747,7 +813,7 @@ export class TaskService {
         updated_by: task.draft_updated_by,
         updated_at: task.draft_updated_at,
       } : undefined,
-      final: task.final_data ? {
+      final: task.final_id ? {
         id: task.final_id,
         task_id: task.id,
         scan_type: task.final_scan_type,

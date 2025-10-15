@@ -31,6 +31,15 @@ export interface Task {
   logs?: string | null;
   raw_json?: unknown;
   end_user_feedback?: EndUserFeedback | null;
+  // Annotation data (from labels_final)
+  annotation?: {
+    scan_type: string;
+    result_return: string;
+    feedback_correction: string[];
+    note: string | null;
+    created_by: string;
+    created_at: string;
+  } | null;
 }
 
 export interface TaskResult {

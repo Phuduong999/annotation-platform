@@ -1,419 +1,493 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { Pool } from 'pg';
-import { z } from 'zod';
-import { AnalyticsService } from '../services/analytics.service';
-import { AlertService } from '../services/alert.service';
-import { MetricType } from '../types/analytics';
-
-// Schema validators
-const TimeSeriesQuerySchema = z.object({
-  metricType: z.string(),
-  startDate: z.string(),
-  endDate: z.string(),
-  aggregation: z.string().optional(),
-  projectId: z.string().optional(),
-});
-
-const KPIQuerySchema = z.object({
-  period: z.enum(['day', 'week', 'month', 'quarter', 'year']),
-  projectId: z.string().optional(),
-  compareWithPrevious: z.coerce.boolean().optional(),
-});
-
-const LeaderboardQuerySchema = z.object({
-  period: z.enum(['day', 'week', 'month', 'all_time']),
-  metric: z.enum(['tasks_completed', 'acceptance_rate', 'review_throughput', 'quality_score']),
-  limit: z.coerce.number().min(1).max(100).optional().default(10),
-  projectId: z.string().optional(),
-});
-
-const AlertRuleSchema = z.object({
-  name: z.string(),
-  metricType: z.nativeEnum(MetricType),
-  condition: z.enum(['>', '<', '>=', '<=', '=', '!=']), // Match database check constraint
-  threshold: z.number(),
-  evaluationPeriod: z.number().min(60).max(3600), // 1 minute to 1 hour
-  projectId: z.string().optional(),
-  isActive: z.boolean().optional().default(true),
-  notificationChannels: z.array(z.string()).optional(),
-});
 
 export async function analyticsRoutes(fastify: FastifyInstance, pool: Pool) {
-  const analyticsService = new AnalyticsService();
-  const alertService = AlertService.getInstance();
-
-  // GET /analytics/metrics/current
-  fastify.get('/analytics/metrics/current', async (request, reply) => {
+  
+  // GET /analytics/overview - Overall statistics
+  fastify.get('/analytics/overview', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { projectId } = request.query as { projectId?: string };
-      
-      const metrics = await analyticsService.getCurrentMetrics({
-        projectId,
-        userId: 'user-123', // TODO: Get from auth context
-      });
+      // Task status distribution
+      const statusStats = await pool.query(`
+        SELECT 
+          status,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
+        FROM tasks
+        GROUP BY status
+        ORDER BY count DESC
+      `);
+
+      // Scan type distribution
+      const typeStats = await pool.query(`
+        SELECT 
+          scan_type as type,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
+        FROM tasks
+        WHERE scan_type IS NOT NULL
+        GROUP BY scan_type
+        ORDER BY count DESC
+      `);
+
+      // Completion rate
+      const completionRate = await pool.query(`
+        SELECT 
+          COUNT(*) FILTER (WHERE status = 'completed') as completed,
+          COUNT(*) FILTER (WHERE status IN ('pending', 'in_progress')) as in_progress,
+          COUNT(*) as total,
+          ROUND(COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / NULLIF(COUNT(*), 0), 2) as completion_percentage
+        FROM tasks
+      `);
+
+      // Average task duration
+      const durationStats = await pool.query(`
+        SELECT 
+          ROUND(AVG(duration_ms) / 1000.0, 2) as avg_duration_seconds,
+          ROUND(MIN(duration_ms) / 1000.0, 2) as min_duration_seconds,
+          ROUND(MAX(duration_ms) / 1000.0, 2) as max_duration_seconds
+        FROM tasks
+        WHERE duration_ms IS NOT NULL AND status = 'completed'
+      `);
 
       return reply.code(200).send({
         success: true,
-        data: metrics,
+        data: {
+          statusDistribution: statusStats.rows,
+          typeDistribution: typeStats.rows,
+          completionRate: completionRate.rows[0],
+          durationStats: durationStats.rows[0],
+        },
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
       fastify.log.error(error);
       return reply.code(500).send({
         success: false,
-        error: 'Failed to fetch metrics',
+        error: error instanceof Error ? error.message : 'Internal server error',
         timestamp: new Date().toISOString(),
       });
     }
   });
 
-  // GET /analytics/time-series
-  fastify.get('/analytics/time-series', async (request, reply) => {
+  // GET /analytics/annotations - Annotation analysis
+  fastify.get('/analytics/annotations', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const query = TimeSeriesQuerySchema.parse(request.query);
-      
-      const data = await analyticsService.getTimeSeries({
-        ...query,
-        userId: 'user-123', // TODO: Get from auth context
-      });
+      // Classification distribution
+      const classificationStats = await pool.query(`
+        SELECT 
+          scan_type as classification,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
+        FROM labels_final
+        WHERE scan_type IS NOT NULL
+        GROUP BY scan_type
+        ORDER BY count DESC
+      `);
+
+      // Result return distribution
+      const resultReturnStats = await pool.query(`
+        SELECT 
+          result_return,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
+        FROM labels_final
+        WHERE result_return IS NOT NULL
+        GROUP BY result_return
+        ORDER BY count DESC
+      `);
+
+      // Feedback correction distribution (multiple values per task)
+      const feedbackCorrectionStats = await pool.query(`
+        SELECT 
+          UNNEST(feedback_correction) as correction_type,
+          COUNT(*) as count
+        FROM labels_final
+        WHERE feedback_correction IS NOT NULL AND array_length(feedback_correction, 1) > 0
+        GROUP BY correction_type
+        ORDER BY count DESC
+      `);
+
+      // Most active annotators
+      const annotatorStats = await pool.query(`
+        SELECT 
+          created_by as annotator,
+          COUNT(*) as annotations_count,
+          COUNT(DISTINCT DATE(created_at)) as active_days,
+          MIN(created_at) as first_annotation,
+          MAX(created_at) as last_annotation
+        FROM labels_final
+        WHERE created_by IS NOT NULL
+        GROUP BY created_by
+        ORDER BY annotations_count DESC
+        LIMIT 10
+      `);
 
       return reply.code(200).send({
         success: true,
-        data,
+        data: {
+          classificationDistribution: classificationStats.rows,
+          resultReturnDistribution: resultReturnStats.rows,
+          feedbackCorrectionDistribution: feedbackCorrectionStats.rows,
+          topAnnotators: annotatorStats.rows,
+        },
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
       fastify.log.error(error);
-      if (error instanceof z.ZodError) {
-        return reply.code(400).send({
-          success: false,
-          error: 'Invalid query parameters',
-          details: error.errors,
-          timestamp: new Date().toISOString(),
-        });
-      }
       return reply.code(500).send({
         success: false,
-        error: 'Failed to fetch time series data',
+        error: error instanceof Error ? error.message : 'Internal server error',
         timestamp: new Date().toISOString(),
       });
     }
   });
 
-  // GET /analytics/kpis
-  fastify.get('/analytics/kpis', async (request, reply) => {
+  // GET /analytics/feedback - End-user feedback analysis
+  fastify.get('/analytics/feedback', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const query = KPIQuerySchema.parse(request.query);
-      
-      const kpis = await analyticsService.getKPIs({
-        ...query,
-        userId: 'user-123', // TODO: Get from auth context
-      });
+      // Reaction distribution
+      const reactionStats = await pool.query(`
+        SELECT 
+          metadata->>'reaction' as reaction,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
+        FROM feedback_events
+        WHERE metadata->>'reaction' IS NOT NULL
+        GROUP BY metadata->>'reaction'
+        ORDER BY count DESC
+      `);
+
+      // Category distribution
+      const categoryStats = await pool.query(`
+        SELECT 
+          metadata->>'category' as category,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
+        FROM feedback_events
+        WHERE metadata->>'category' IS NOT NULL
+        GROUP BY metadata->>'category'
+        ORDER BY count DESC
+      `);
+
+      // Tasks with dislike by scan type
+      const dislikeByType = await pool.query(`
+        SELECT 
+          t.scan_type,
+          COUNT(*) as dislike_count,
+          COUNT(DISTINCT t.id) as total_tasks_with_feedback,
+          ROUND(COUNT(*) * 100.0 / COUNT(DISTINCT t.id), 2) as dislike_rate
+        FROM tasks t
+        INNER JOIN feedback_events fe ON fe.task_id = t.id
+        WHERE fe.metadata->>'reaction' = 'dislike'
+        GROUP BY t.scan_type
+        ORDER BY dislike_count DESC
+      `);
+
+      // Dislike reasons
+      const dislikeReasons = await pool.query(`
+        SELECT 
+          metadata->>'category' as reason,
+          COUNT(*) as count
+        FROM feedback_events
+        WHERE metadata->>'reaction' = 'dislike' AND metadata->>'category' IS NOT NULL
+        GROUP BY metadata->>'category'
+        ORDER BY count DESC
+      `);
 
       return reply.code(200).send({
         success: true,
-        data: kpis,
+        data: {
+          reactionDistribution: reactionStats.rows,
+          categoryDistribution: categoryStats.rows,
+          dislikeByType: dislikeByType.rows,
+          dislikeReasons: dislikeReasons.rows,
+        },
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
       fastify.log.error(error);
-      if (error instanceof z.ZodError) {
-        return reply.code(400).send({
-          success: false,
-          error: 'Invalid query parameters',
-          details: error.errors,
-          timestamp: new Date().toISOString(),
-        });
-      }
       return reply.code(500).send({
         success: false,
-        error: 'Failed to fetch KPIs',
+        error: error instanceof Error ? error.message : 'Internal server error',
         timestamp: new Date().toISOString(),
       });
     }
   });
 
-  // GET /analytics/leaderboard
-  fastify.get('/analytics/leaderboard', async (request, reply) => {
+  // GET /analytics/dropoff - Dropoff analysis
+  fastify.get('/analytics/dropoff', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const query = LeaderboardQuerySchema.parse(request.query);
+      // Funnel analysis
+      const funnelStats = await pool.query(`
+        SELECT 
+          COUNT(*) FILTER (WHERE status = 'pending') as stage_1_pending,
+          COUNT(*) FILTER (WHERE status = 'in_progress') as stage_2_started,
+          COUNT(*) FILTER (WHERE status = 'completed') as stage_3_completed,
+          COUNT(*) FILTER (WHERE status = 'skipped') as dropoff_skipped,
+          COUNT(*) FILTER (WHERE status = 'failed') as dropoff_failed
+        FROM tasks
+      `);
+
+      const funnel = funnelStats.rows[0];
+      const total = parseInt(funnel.stage_1_pending) + parseInt(funnel.stage_2_started) + parseInt(funnel.stage_3_completed);
       
-      const leaderboard = await analyticsService.getLeaderboard({
-        ...query,
-        organizationId: 'org-123', // TODO: Get from auth context
-      });
-
-      return reply.code(200).send({
-        success: true,
-        data: leaderboard,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      fastify.log.error(error);
-      if (error instanceof z.ZodError) {
-        return reply.code(400).send({
-          success: false,
-          error: 'Invalid query parameters',
-          details: error.errors,
-          timestamp: new Date().toISOString(),
-        });
-      }
-      return reply.code(500).send({
-        success: false,
-        error: 'Failed to fetch leaderboard',
-        timestamp: new Date().toISOString(),
-      });
-    }
-  });
-
-  // GET /analytics/alerts
-  fastify.get('/analytics/alerts', async (request, reply) => {
-    try {
-      const { status, severity, limit = 50, offset = 0 } = request.query as {
-        status?: string;
-        severity?: string;
-        limit?: number;
-        offset?: number;
+      // Calculate dropoff rates
+      const dropoffAnalysis = {
+        stage_1_pending: {
+          count: parseInt(funnel.stage_1_pending),
+          percentage: total > 0 ? parseFloat(((parseInt(funnel.stage_1_pending) / total) * 100).toFixed(2)) : 0,
+        },
+        stage_2_started: {
+          count: parseInt(funnel.stage_2_started),
+          percentage: total > 0 ? parseFloat(((parseInt(funnel.stage_2_started) / total) * 100).toFixed(2)) : 0,
+        },
+        stage_3_completed: {
+          count: parseInt(funnel.stage_3_completed),
+          percentage: total > 0 ? parseFloat(((parseInt(funnel.stage_3_completed) / total) * 100).toFixed(2)) : 0,
+        },
+        dropoff: {
+          skipped: parseInt(funnel.dropoff_skipped),
+          failed: parseInt(funnel.dropoff_failed),
+          total: parseInt(funnel.dropoff_skipped) + parseInt(funnel.dropoff_failed),
+        },
       };
-      
-      const alerts = await analyticsService.getAlerts({
-        userId: 'user-123', // TODO: Get from auth context
-        status,
-        severity,
-        limit: Number(limit),
-        offset: Number(offset),
-      });
+
+      // Time-based dropoff (tasks started but not completed within 24h)
+      const staleTasksStats = await pool.query(`
+        SELECT 
+          COUNT(*) as stale_count,
+          ROUND(AVG(EXTRACT(EPOCH FROM (NOW() - started_at)) / 3600), 2) as avg_hours_stale
+        FROM tasks
+        WHERE status = 'in_progress' 
+        AND started_at < NOW() - INTERVAL '24 hours'
+      `);
 
       return reply.code(200).send({
         success: true,
-        data: alerts,
+        data: {
+          funnel: dropoffAnalysis,
+          staleTasks: staleTasksStats.rows[0],
+        },
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
       fastify.log.error(error);
       return reply.code(500).send({
         success: false,
-        error: 'Failed to fetch alerts',
+        error: error instanceof Error ? error.message : 'Internal server error',
         timestamp: new Date().toISOString(),
       });
     }
   });
 
-  // POST /analytics/alerts/rules
-  fastify.post('/analytics/alerts/rules', async (request, reply) => {
+  // GET /analytics/by-type - Analysis by scan type
+  fastify.get('/analytics/by-type', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const ruleData = AlertRuleSchema.parse(request.body);
-      
-      const rule = await alertService.upsertAlertRule({
-        ...ruleData,
-        createdBy: 'user-123', // TODO: Get from auth context
-      });
+      // Dropoff rate by type
+      const dropoffByType = await pool.query(`
+        SELECT 
+          scan_type,
+          COUNT(*) FILTER (WHERE status = 'pending') as pending,
+          COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
+          COUNT(*) FILTER (WHERE status = 'completed') as completed,
+          COUNT(*) FILTER (WHERE status = 'skipped') as skipped,
+          COUNT(*) FILTER (WHERE status = 'failed') as failed,
+          COUNT(*) as total,
+          ROUND(COUNT(*) FILTER (WHERE status IN ('skipped', 'failed')) * 100.0 / NULLIF(COUNT(*), 0), 2) as dropoff_rate
+        FROM tasks
+        WHERE scan_type IS NOT NULL
+        GROUP BY scan_type
+        ORDER BY dropoff_rate DESC NULLS LAST
+      `);
 
-      return reply.code(201).send({
-        success: true,
-        data: rule,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      fastify.log.error(error);
-      if (error instanceof z.ZodError) {
-        return reply.code(400).send({
-          success: false,
-          error: 'Invalid alert rule data',
-          details: error.errors,
-          timestamp: new Date().toISOString(),
-        });
-      }
-      return reply.code(500).send({
-        success: false,
-        error: 'Failed to create alert rule',
-        timestamp: new Date().toISOString(),
-      });
-    }
-  });
+      // Annotation tags frequency by type
+      const tagsByType = await pool.query(`
+        SELECT 
+          t.scan_type,
+          lf.scan_type as annotated_classification,
+          lf.result_return,
+          UNNEST(lf.feedback_correction) as feedback_tag,
+          COUNT(*) as tag_count
+        FROM tasks t
+        INNER JOIN labels_final lf ON lf.task_id = t.id
+        WHERE t.scan_type IS NOT NULL AND lf.feedback_correction IS NOT NULL
+        GROUP BY t.scan_type, lf.scan_type, lf.result_return, feedback_tag
+        ORDER BY t.scan_type, tag_count DESC
+      `);
 
-  // DELETE /analytics/alerts/rules/:id
-  fastify.delete('/analytics/alerts/rules/:id', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-      
-      await alertService.deleteAlertRule(id);
-
-      return reply.code(204).send();
-    } catch (error) {
-      fastify.log.error(error);
-      return reply.code(500).send({
-        success: false,
-        error: 'Failed to delete alert rule',
-        timestamp: new Date().toISOString(),
-      });
-    }
-  });
-
-  // PUT /analytics/alerts/:id/acknowledge
-  fastify.put('/analytics/alerts/:id/acknowledge', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-      
-      const alert = await analyticsService.acknowledgeAlert(id, 'user-123'); // TODO: Get from auth
+      // Classification match rate by original type
+      const classificationMatch = await pool.query(`
+        SELECT 
+          t.scan_type as original_type,
+          lf.scan_type as annotated_type,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (PARTITION BY t.scan_type), 2) as percentage
+        FROM tasks t
+        INNER JOIN labels_final lf ON lf.task_id = t.id
+        WHERE t.scan_type IS NOT NULL
+        GROUP BY t.scan_type, lf.scan_type
+        ORDER BY t.scan_type, count DESC
+      `);
 
       return reply.code(200).send({
         success: true,
-        data: alert,
+        data: {
+          dropoffByType: dropoffByType.rows,
+          tagsByType: tagsByType.rows,
+          classificationMatch: classificationMatch.rows,
+        },
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
       fastify.log.error(error);
       return reply.code(500).send({
         success: false,
-        error: 'Failed to acknowledge alert',
+        error: error instanceof Error ? error.message : 'Internal server error',
         timestamp: new Date().toISOString(),
       });
     }
   });
 
-  // GET /analytics/alerts/stats
-  fastify.get('/analytics/alerts/stats', async (request, reply) => {
+  // GET /analytics/user-behavior - User behavior analysis
+  fastify.get('/analytics/user-behavior', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { projectId } = request.query as { projectId?: string };
+      // Users who viewed AI result but didn't provide feedback
+      const exitWithoutFeedback = await pool.query(`
+        SELECT 
+          t.scan_type,
+          COUNT(DISTINCT t.id) as tasks_without_feedback,
+          COUNT(DISTINCT t.user_id) as unique_users,
+          ROUND(COUNT(DISTINCT t.id) * 100.0 / NULLIF(
+            (SELECT COUNT(*) FROM tasks WHERE raw_ai_output IS NOT NULL), 
+          0), 2) as exit_rate
+        FROM tasks t
+        LEFT JOIN feedback_events fe ON fe.task_id = t.id
+        WHERE t.raw_ai_output IS NOT NULL -- AI result was shown
+        AND t.status = 'pending' -- User didn't take action
+        AND fe.id IS NULL -- No feedback provided
+        GROUP BY t.scan_type
+        ORDER BY tasks_without_feedback DESC
+      `);
+
+      // Tasks with AI output but no user engagement
+      const noEngagement = await pool.query(`
+        SELECT 
+          COUNT(*) as total_no_engagement,
+          COUNT(DISTINCT user_id) as unique_users,
+          ROUND(AVG(CAST(ai_confidence AS numeric)), 2) as avg_ai_confidence
+        FROM tasks
+        WHERE raw_ai_output IS NOT NULL
+        AND status = 'pending'
+        AND started_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM feedback_events fe WHERE fe.task_id = tasks.id
+        )
+      `);
+
+      // Engagement funnel
+      const engagementFunnel = await pool.query(`
+        SELECT 
+          COUNT(*) FILTER (WHERE raw_ai_output IS NOT NULL) as stage_1_ai_shown,
+          COUNT(*) FILTER (WHERE started_at IS NOT NULL) as stage_2_task_started,
+          COUNT(*) FILTER (WHERE completed_at IS NOT NULL) as stage_3_task_completed,
+          COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM feedback_events fe WHERE fe.task_id = tasks.id
+          )) as stage_4_feedback_given
+        FROM tasks
+      `);
+
+      const funnel = engagementFunnel.rows[0];
+      const aiShown = parseInt(funnel.stage_1_ai_shown);
       
-      const stats = await alertService.getAlertStatistics(projectId);
-
-      return reply.code(200).send({
-        success: true,
-        data: stats,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      fastify.log.error(error);
-      return reply.code(500).send({
-        success: false,
-        error: 'Failed to fetch alert statistics',
-        timestamp: new Date().toISOString(),
-      });
-    }
-  });
-
-  // GET /analytics/project/:projectId/summary
-  fastify.get('/analytics/project/:projectId/summary', async (request, reply) => {
-    try {
-      const { projectId } = request.params as { projectId: string };
-      
-      const summary = await analyticsService.getProjectSummary(
-        projectId,
-        'user-123' // TODO: Get from auth context
-      );
-
-      return reply.code(200).send({
-        success: true,
-        data: summary,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      fastify.log.error(error);
-      return reply.code(500).send({
-        success: false,
-        error: 'Failed to fetch project summary',
-        timestamp: new Date().toISOString(),
-      });
-    }
-  });
-
-  // GET /analytics/export
-  fastify.get('/analytics/export', async (request, reply) => {
-    try {
-      const {
-        format = 'json',
-        startDate,
-        endDate,
-        projectId
-      } = request.query as {
-        format?: 'json' | 'csv';
-        startDate: string;
-        endDate: string;
-        projectId?: string;
+      const engagementMetrics = {
+        ai_result_shown: aiShown,
+        task_started: {
+          count: parseInt(funnel.stage_2_task_started),
+          rate: aiShown > 0 ? parseFloat(((parseInt(funnel.stage_2_task_started) / aiShown) * 100).toFixed(2)) : 0,
+        },
+        task_completed: {
+          count: parseInt(funnel.stage_3_task_completed),
+          rate: aiShown > 0 ? parseFloat(((parseInt(funnel.stage_3_task_completed) / aiShown) * 100).toFixed(2)) : 0,
+        },
+        feedback_given: {
+          count: parseInt(funnel.stage_4_feedback_given),
+          rate: aiShown > 0 ? parseFloat(((parseInt(funnel.stage_4_feedback_given) / aiShown) * 100).toFixed(2)) : 0,
+        },
       };
-      
-      if (!startDate || !endDate) {
-        return reply.code(400).send({
-          success: false,
-          error: 'startDate and endDate are required',
-          timestamp: new Date().toISOString(),
-        });
-      }
 
-      const exportData = await analyticsService.exportAnalytics({
-        format,
-        startDate,
-        endDate,
-        projectId,
-        userId: 'user-123', // TODO: Get from auth context
+      // Time spent before exit (for users who didn't complete)
+      const timeAnalysis = await pool.query(`
+        SELECT 
+          t.scan_type,
+          COUNT(*) as tasks,
+          ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(started_at, created_at) - created_at))), 2) as avg_seconds_before_exit
+        FROM tasks t
+        WHERE status = 'pending'
+        AND created_at < NOW() - INTERVAL '1 hour'
+        GROUP BY t.scan_type
+      `);
+
+      return reply.code(200).send({
+        success: true,
+        data: {
+          exitWithoutFeedback: exitWithoutFeedback.rows,
+          noEngagement: noEngagement.rows[0],
+          engagementMetrics,
+          timeBeforeExit: timeAnalysis.rows,
+        },
+        timestamp: new Date().toISOString(),
       });
-
-      const contentType = format === 'csv' ? 'text/csv' : 'application/json';
-      const filename = `analytics-export-${new Date().toISOString().split('T')[0]}.${format}`;
-
-      return reply
-        .header('Content-Type', contentType)
-        .header('Content-Disposition', `attachment; filename="${filename}"`)
-        .code(200)
-        .send(exportData);
     } catch (error) {
       fastify.log.error(error);
       return reply.code(500).send({
         success: false,
-        error: 'Failed to export analytics data',
+        error: error instanceof Error ? error.message : 'Internal server error',
         timestamp: new Date().toISOString(),
       });
     }
   });
 
-  // GET /analytics/health
-  fastify.get('/analytics/health', async (request, reply) => {
-    return reply.code(200).send({
-      success: true,
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-    });
-  });
-
-  // Initialize default alert rules for link_error_rate and acceptance_rate
-  await initializeDefaultAlertRules(alertService);
-}
-
-/**
- * Initialize default alert rules for critical metrics
- */
-async function initializeDefaultAlertRules(alertService: AlertService): Promise<void> {
-  const defaultRules = [
-    {
-      name: 'High Link Error Rate Alert',
-      metricType: MetricType.LINK_ERROR_RATE,
-      condition: '>' as const, // Changed from 'greater_than' to match DB constraint
-      threshold: 5, // 5%
-      evaluationPeriod: 300, // 5 minutes
-      isActive: true,
-      notificationChannels: ['webhook', 'database'],
-      createdBy: 'system',
-    },
-    {
-      name: 'Low Acceptance Rate Alert',
-      metricType: MetricType.ACCEPTANCE_RATE,
-      condition: '<' as const, // Changed from 'less_than' to match DB constraint
-      threshold: 75, // 75%
-      evaluationPeriod: 600, // 10 minutes
-      isActive: true,
-      notificationChannels: ['webhook', 'database'],
-      createdBy: 'system',
-    },
-  ];
-
-  for (const rule of defaultRules) {
+  // GET /analytics/trends - Time-based trends
+  fastify.get('/analytics/trends', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
-      await alertService.upsertAlertRule(rule);
-      console.log(`Initialized default alert rule: ${rule.name}`);
+      // Daily completion trend (last 14 days)
+      const dailyTrend = await pool.query(`
+        SELECT 
+          DATE(completed_at) as date,
+          COUNT(*) as completed_count,
+          ROUND(AVG(duration_ms) / 1000.0, 2) as avg_duration_seconds
+        FROM tasks
+        WHERE completed_at >= NOW() - INTERVAL '14 days' AND status = 'completed'
+        GROUP BY DATE(completed_at)
+        ORDER BY date DESC
+      `);
+
+      // Hourly distribution (when are tasks completed most)
+      const hourlyDistribution = await pool.query(`
+        SELECT 
+          EXTRACT(HOUR FROM completed_at) as hour,
+          COUNT(*) as count
+        FROM tasks
+        WHERE status = 'completed' AND completed_at IS NOT NULL
+        GROUP BY EXTRACT(HOUR FROM completed_at)
+        ORDER BY hour
+      `);
+
+      return reply.code(200).send({
+        success: true,
+        data: {
+          dailyTrend: dailyTrend.rows,
+          hourlyDistribution: hourlyDistribution.rows,
+        },
+        timestamp: new Date().toISOString(),
+      });
     } catch (error) {
-      console.error(`Failed to initialize alert rule ${rule.name}:`, error);
+      fastify.log.error(error);
+      return reply.code(500).send({
+        success: false,
+        error: error instanceof Error ? error.message : 'Internal server error',
+        timestamp: new Date().toISOString(),
+      });
     }
-  }
+  });
 }

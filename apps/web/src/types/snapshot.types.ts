@@ -1,7 +1,7 @@
 // Snapshot and export types
 
-export type DataSplit = 'train' | 'validation' | 'test';
-export type ExportFormat = 'csv' | 'json' | 'jsonl' | 'parquet';
+export type DataSplit = 'train' | 'validation' | 'test' | 'all';
+export type ExportFormat = 'csv' | 'json' | 'jsonl' | 'xlsx';
 export type SnapshotStatus = 'pending' | 'processing' | 'completed' | 'failed';
 export type ExportStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'expired';
 
